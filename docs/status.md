@@ -11,7 +11,7 @@
 | docs/plan.md | IMPLEMENTED | pending my review | |
 | Task 1: project scaffold | VERIFIED BY TEST | `npm test` (1 passed) | |
 | Task 2: URL validation | VERIFIED BY TEST | `npm test -- src/url/__tests__/validate.test.ts` (30 passed) | |
-| Task 3: address classification | NOT STARTED | — | |
+| Task 3: address classification | VERIFIED BY TEST | `npm test -- src/net/__tests__/address.test.ts` (21 passed) | |
 | Task 4: resolver & guard | NOT STARTED | — | |
 | Task 5: DNS timing | NOT STARTED | — | |
 | Task 6: TCP timing | NOT STARTED | — | |
