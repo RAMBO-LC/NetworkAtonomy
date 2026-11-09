@@ -9,7 +9,7 @@
 | docs/planning.md | IMPLEMENTED | pending my review | |
 | docs/spec.md | IMPLEMENTED | pending my review | |
 | docs/plan.md | IMPLEMENTED | pending my review | |
-| Task 1: project scaffold | NOT STARTED | — | |
+| Task 1: project scaffold | VERIFIED BY TEST | `npm test` (1 passed) | |
 | Task 2: URL validation | NOT STARTED | — | |
 | Task 3: address classification | NOT STARTED | — | |
 | Task 4: resolver & guard | NOT STARTED | — | |
