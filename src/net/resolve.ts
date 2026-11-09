@@ -1,0 +1,184 @@
+/**
+ * DNS resolution with SSRF guard.
+ *
+ * Resolves A/AAAA records for a hostname, checks all IPs against the
+ * address guard, and returns the first allowed IP with its family.
+ * If ANY resolved IP is blocked, throws an error.
+ */
+
+import { classifyAddress, isAddressBlocked, type AddressFamily } from "./address";
+
+/**
+ * Result of a successful hostname resolution.
+ */
+export interface ResolvedHost {
+  /** The IP address that passed the guard check. */
+  address: string;
+  /** The address family of the resolved IP. */
+  family: AddressFamily;
+}
+
+/**
+ * DNS resolver function signature.
+ * Implementations should resolve both A (IPv4) and AAAA (IPv6) records.
+ */
+export type DnsResolver = (hostname: string) => Promise<{ ipv4: string[]; ipv6: string[] }>;
+
+/**
+ * Default DNS resolver using Node.js `dns/promises`.
+ * Resolves both A and AAAA records in parallel.
+ */
+export async function defaultDnsResolver(hostname: string): Promise<{ ipv4: string[]; ipv6: string[] }> {
+  const { resolve4, resolve6 } = await import("node:dns/promises");
+
+  const [ipv4, ipv6] = await Promise.all([
+    resolve4(hostname).catch(() => [] as string[]),
+    resolve6(hostname).catch(() => [] as string[]),
+  ]);
+
+  return { ipv4, ipv6 };
+}
+
+/**
+ * Error thrown when DNS resolution yields no addresses.
+ */
+export class ResolutionError extends Error {
+  constructor(hostname: string) {
+    super(`DNS resolution failed for ${hostname}: no addresses found`);
+    this.name = "ResolutionError";
+  }
+}
+
+/**
+ * Error thrown when any resolved address is blocked by the SSRF guard.
+ */
+export class BlockedAddressError extends Error {
+  public readonly blockedAddresses: string[];
+
+  constructor(hostname: string, blockedAddresses: string[]) {
+    const addresses = blockedAddresses.join(", ");
+    super(`SSRF guard blocked ${hostname}: ${addresses}`);
+    this.name = "BlockedAddressError";
+    this.blockedAddresses = blockedAddresses;
+  }
+}
+
+/**
+ * Check if an address is an IPv4-mapped IPv6 address (::ffff:x.x.x.x).
+ */
+function isIpv4MappedIpv6(address: string): boolean {
+  return address.startsWith("::ffff:") && address.includes(".");
+}
+
+/**
+ * Extract the IPv4 address from an IPv4-mapped IPv6 address.
+ */
+function extractIpv4FromMapped(address: string): string | null {
+  const match = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  return match?.[1] ?? null;
+}
+
+/**
+ * Check if an address is blocked, handling IPv4-mapped IPv6 addresses
+ * that the underlying address module may not handle correctly.
+ */
+function checkAddressBlocked(address: string): { blocked: boolean; blockedRange?: string } {
+  // First, explicitly check for IPv4-mapped IPv6 addresses
+  // The address module parses them but doesn't check the mapped IPv4 against blocked ranges
+  if (isIpv4MappedIpv6(address)) {
+    const ipv4 = extractIpv4FromMapped(address);
+    if (ipv4) {
+      try {
+        if (isAddressBlocked(ipv4)) {
+          const classified = classifyAddress(ipv4);
+          return { blocked: true, blockedRange: classified.blockedRange };
+        }
+        return { blocked: false };
+      } catch {
+        // If even IPv4 check fails, treat as blocked for safety
+        return { blocked: true, blockedRange: "invalid-mapped" };
+      }
+    }
+  }
+
+  // Standard check for all other addresses
+  try {
+    if (isAddressBlocked(address)) {
+      // Get the blocked range name by calling classifyAddress
+      const classified = classifyAddress(address);
+      return { blocked: true, blockedRange: classified.blockedRange };
+    }
+    return { blocked: false };
+  } catch {
+    // For any other unparseable address, treat as blocked for safety
+    return { blocked: true, blockedRange: "unparseable" };
+  }
+}
+
+/**
+ * Get the normalized address and family, handling IPv4-mapped IPv6.
+ */
+function getNormalizedAddressAndFamily(address: string): { address: string; family: AddressFamily } {
+  try {
+    const classified = classifyAddress(address);
+    return { address: classified.address, family: classified.family };
+  } catch {
+    // Handle IPv4-mapped IPv6
+    if (isIpv4MappedIpv6(address)) {
+      const ipv4 = extractIpv4FromMapped(address);
+      if (ipv4) {
+        const classified = classifyAddress(ipv4);
+        return { address: classified.address, family: "ipv4" as AddressFamily };
+      }
+    }
+    throw new Error(`Invalid IP address: ${address}`);
+  }
+}
+
+/**
+ * Resolve a hostname to an allowed IP address.
+ *
+ * @param hostname - The hostname to resolve.
+ * @param resolver - Optional DNS resolver. Defaults to Node.js `dns/promises`.
+ *                   Injected for testing (e.g., fake resolver returning blocked IPs).
+ * @returns The first allowed IP address and its family (prefers IPv4).
+ * @throws {ResolutionError} If no addresses are resolved.
+ * @throws {BlockedAddressError} If ANY resolved address is in a blocked range.
+ */
+export async function resolveHostname(
+  hostname: string,
+  resolver: DnsResolver = defaultDnsResolver,
+): Promise<ResolvedHost> {
+  const { ipv4, ipv6 } = await resolver(hostname);
+
+  const allAddresses = [...ipv4, ...ipv6];
+
+  if (allAddresses.length === 0) {
+    throw new ResolutionError(hostname);
+  }
+
+  // Check ALL addresses against the guard first.
+  // If ANY is blocked, abort immediately (SSRF protection).
+  const blockedAddresses: string[] = [];
+  for (const address of allAddresses) {
+    const { blocked } = checkAddressBlocked(address);
+    if (blocked) {
+      blockedAddresses.push(address);
+    }
+  }
+
+  if (blockedAddresses.length > 0) {
+    throw new BlockedAddressError(hostname, blockedAddresses);
+  }
+
+  // All addresses are allowed. Pick the first one, preferring IPv4.
+  const preferredOrder = [...ipv4, ...ipv6];
+  const chosen = preferredOrder[0];
+
+  if (!chosen) {
+    throw new ResolutionError(hostname);
+  }
+
+  const { address, family } = getNormalizedAddressAndFamily(chosen);
+  return { address, family };
+}
