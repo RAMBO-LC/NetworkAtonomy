@@ -4,7 +4,7 @@
 
 `reqanatomy` is a command-line tool that times each stage of loading a URL (DNS, TCP connect, TLS handshake, time to first byte, body download) and prints the median of several runs.
 
-See `docs/spec.md` for the full specification and `docs/plan.md` for the task plan.
+See [[docs/spec.md]] for the full specification and [[docs/plan.md]] for the task plan.
 
 ## Current Phase
 
@@ -14,17 +14,17 @@ See `docs/spec.md` for the full specification and `docs/plan.md` for the task pl
 
 Before any change, confirm:
 
-1. Read the current task in `docs/plan.md`.
+1. Read the current task in [[docs/plan.md]].
 2. `git status` is clean.
 3. You are on a branch named `task/<name>` (never `main`).
-4. Read the relevant entries in `docs/knowledge.md` and `docs/decisions.md`.
+4. Read the relevant entries in [[docs/knowledge.md]] and [[docs/decisions.md]].
 
 ## Scope
 
 - Change only the files allowed by the current task.
-- No features outside `docs/spec.md`.
+- No features outside [[docs/spec.md]].
 - No web UI, accounts, monitoring, or browser rendering in v1.
-- Do not add a dependency without a decision entry in `docs/decisions.md` and user approval.
+- Do not add a dependency without a decision entry in [[docs/decisions.md]] and user approval.
 
 ## Tests
 
@@ -50,7 +50,7 @@ Before any change, confirm:
 
 ## Records
 
-Update `docs/status.md`, `docs/decisions.md`, `docs/knowledge.md`, and `CHANGELOG.md` in the same change as any code. Update `docs/overview.md`, `docs/challenges.md`, `docs/parameters.md`, and `docs/planning.md` when the plan, a challenge, or a parameter changes.
+Update [[docs/status.md]], [[docs/decisions.md]], [[docs/knowledge.md]], and [[CHANGELOG.md]] in the same change as any code. Update [[docs/overview.md]], [[docs/challenges.md]], [[docs/parameters.md]], and [[docs/planning.md]] when the plan, a challenge, or a parameter changes.
 
 ## Evidence Labels
 
@@ -76,8 +76,8 @@ When the user needs to check something, give one command that prints the state, 
 
 ## When Stuck
 
-Stop, write the blocker under "Open questions" in `docs/knowledge.md`, and report it. Do not guess.
+Stop, write the blocker under "Open questions" in [[docs/knowledge.md]], and report it. Do not guess.
 
 ## Report Format
 
-Follow `.agent/workflows/report-review.md`.
+Follow [[.agent/workflows/report-review.md]].
