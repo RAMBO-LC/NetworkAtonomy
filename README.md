@@ -16,7 +16,11 @@ reqanatomy https://example.com --json
 
 **Documentation:**
 
-- `docs/spec.md` — full specification
-- `docs/plan.md` — task plan
+- `docs/overview.md` — the idea
+- `docs/challenges.md` — risks and open questions
+- `docs/parameters.md` — settings reference
+- `docs/planning.md` — phases and milestones
+- `docs/spec.md` — full specification (Phase 2)
+- `docs/plan.md` — task plan (Phase 2)
 - `docs/decisions.md` — design decisions
 - `AGENT.md` — agent rules

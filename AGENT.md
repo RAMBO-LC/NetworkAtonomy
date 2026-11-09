@@ -50,7 +50,7 @@ Before any change, confirm:
 
 ## Records
 
-Update `docs/status.md`, `docs/decisions.md`, `docs/knowledge.md`, and `CHANGELOG.md` in the same change as any code.
+Update `docs/status.md`, `docs/decisions.md`, `docs/knowledge.md`, and `CHANGELOG.md` in the same change as any code. Update `docs/overview.md`, `docs/challenges.md`, `docs/parameters.md`, and `docs/planning.md` when the plan, a challenge, or a parameter changes.
 
 ## Evidence Labels
 
