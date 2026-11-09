@@ -10,7 +10,7 @@
 | docs/spec.md | IMPLEMENTED | pending my review | |
 | docs/plan.md | IMPLEMENTED | pending my review | |
 | Task 1: project scaffold | VERIFIED BY TEST | `npm test` (1 passed) | |
-| Task 2: URL validation | NOT STARTED | — | |
+| Task 2: URL validation | VERIFIED BY TEST | `npm test -- src/url/__tests__/validate.test.ts` (30 passed) | |
 | Task 3: address classification | NOT STARTED | — | |
 | Task 4: resolver & guard | NOT STARTED | — | |
 | Task 5: DNS timing | NOT STARTED | — | |
