@@ -12,6 +12,7 @@
 | `tls.connect()` emits `'secureConnect'` on TLS handshake complete | https://nodejs.org/api/tls.html | 2026-11-09 |
 | `http.ClientRequest.on('response')` fires when headers received | https://nodejs.org/api/http.html | 2026-11-09 |
 | Stream `'end'` event fires when body fully received | https://nodejs.org/api/stream.html | 2026-11-09 |
+| WHATWG `URL` constructor lowercases scheme, parses host/port; length-first validation avoids parse-side effects | https://url.spec.whatwg.org/ | 2026-11-09 |
 | `npm ci` installs from lockfile; `vitest run` executes tests with globals; `tsc --noEmit` typechecks without emit | https://docs.npmjs.com/cli/v10/commands/npm-ci, https://vitest.dev/config/, https://www.typescriptlang.org/docs/handbook/compiler-options.html | 2026-11-09 |
 
 ## Open Questions
