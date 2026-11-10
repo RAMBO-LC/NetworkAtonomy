@@ -16,7 +16,7 @@
 | Task 5: DNS timing | VERIFIED BY TEST | `npm test -- src/stages/__tests__/dns.test.ts` (7 passed) | |
 | Task 6: TCP timing | VERIFIED BY TEST | `npm test -- src/stages/__tests__/tcp.test.ts` (4 passed) | |
 | Task 7: TLS timing | VERIFIED BY TEST | `npm test -- src/stages/__tests__/tls.test.ts` (3 passed) | |
-| Task 8: HTTP TTFB & body timing | NOT STARTED | — | |
+| Task 8: HTTP TTFB & body timing | VERIFIED BY TEST | `npm test -- src/stages/__tests__/http.test.ts` (10 passed) | |
 | Task 9: runs & median | NOT STARTED | — | |
 | Task 10: terminal output | NOT STARTED | — | |
 | Task 11: JSON output & schema | NOT STARTED | — | |

@@ -16,3 +16,4 @@
 - Task 5: DNS timing ([[src/stages/dns.ts]], [[src/stages/__tests__/dns.test.ts]]) — 7 unit tests measuring resolution duration with injected resolver; verified by `npm test`.
 - Task 6: TCP timing ([[src/stages/tcp.ts]], [[src/stages/__tests__/tcp.test.ts]]) — 4 unit tests measuring connect duration against local ephemeral server; verified by `npm test`.
 - Task 7: TLS timing ([[src/stages/tls.ts]], [[src/stages/__tests__/tls.test.ts]], [[src/fixtures/localhost-cert.pem]]) — 3 unit tests measuring TLS handshake duration (HTTPS > 0, HTTP = 0); verified by `npm test`.
+- Task 8: HTTP TTFB & body timing ([[src/stages/http.ts]], [[src/stages/__tests__/http.test.ts]]) — 10 unit tests measuring HTTP TTFB, body download duration, status code parsing, and maxBody capping; verified by `npm test`.
