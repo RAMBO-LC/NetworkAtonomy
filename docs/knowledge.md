@@ -16,6 +16,7 @@
 | IPv4/IPv6 CIDR range matching via bitwise operations correctly identifies all blocked ranges per RFC 1918, RFC 4193, RFC 3927, RFC 5735 | https://datatracker.ietf.org/doc/html/rfc1918, https://datatracker.ietf.org/doc/html/rfc4193, https://datatracker.ietf.org/doc/html/rfc3927 | 2026-11-09 |
 | DNS rebinding: attacker changes DNS after check to point to private IP; guard resolves, checks all addresses, connects only to checked address | https://owasp.org/www-community/attacks/DNS_Rebinding | 2026-11-09 |
 | IPv4-mapped IPv6 addresses (::ffff:x.x.x.x) must be normalized to IPv4 before guard check | https://datatracker.ietf.org/doc/html/rfc4291 | 2026-11-09 |
+| DNS timing: `performance.now()` before `resolver()`, stop after all addresses returned, injectable resolver for testability | https://nodejs.org/api/perf_hooks.html | 2026-11-09 |
 | `npm ci` installs from lockfile; `vitest run` executes tests with globals; `tsc --noEmit` typechecks without emit | https://docs.npmjs.com/cli/v10/commands/npm-ci, https://vitest.dev/config/, https://www.typescriptlang.org/docs/handbook/compiler-options.html | 2026-11-09 |
 
 ## Open Questions
