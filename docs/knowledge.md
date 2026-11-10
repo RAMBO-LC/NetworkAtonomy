@@ -23,6 +23,7 @@
 | Median calculation: sorted array, odd count = middle, even count = average of two middle values | https://en.wikipedia.org/wiki/Median | 2026-11-09 |
 | CLI argument parsing: positional URL + flags (--runs, --concurrency, --delay, --max-body, --insecure, --timeout, --json, --explain, --help) | https://nodejs.org/api/process.html | 2026-11-09 |
 | JSON Schema validation: structural typing with $defs for reusable stageStats, enum for family, non-negative number constraints | https://json-schema.org/ | 2026-11-09 |
+| --explain dry-run: pre-resolves IP via DNS, lists stages (DNS/TCP/TLS/TTFB/Body), calculates estimated time from runs/concurrency/delay/timeouts | https://nodejs.org/api/process.html | 2026-11-09 |
 | `npm ci` installs from lockfile; `vitest run` executes tests with globals; `tsc --noEmit` typechecks without emit | https://docs.npmjs.com/cli/v10/commands/npm-ci, https://vitest.dev/config/, https://www.typescriptlang.org/docs/handbook/compiler-options.html | 2026-11-09 |
 
 ## Open Questions

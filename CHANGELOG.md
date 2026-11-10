@@ -20,3 +20,4 @@
 - Task 9: Runs orchestration & median ([[src/runner.ts]], [[src/__tests__/runner.test.ts]]) — 29 unit tests covering sequential/concurrent execution, median/min/max stats, partial failures, injected resolver, IPv4/IPv6, delay between runs; verified by `npm test`.
 - Task 10: CLI entry point ([[src/cli.ts]], [[src/__tests__/cli.test.ts]]) — 32 unit tests covering argument parsing, flag validation, explain mode, runProbes integration, JSON/human output, exit codes; verified by `npm test`.
 - Task 11: JSON output & schema ([[src/json.ts]], [[src/__tests__/json.test.ts]], [[schema/output.json]]) — 34 unit tests covering serialization, round-trip parsing, type guards, schema structure; verified by `npm test`.
+- Task 12: --explain output ([[src/cli.ts]]) — Enhanced dry-run mode showing parsed options, resolved IP via DNS, stages to run (DNS/TCP/TLS/TTFB/Body), per-stage timeouts, and estimated total time; verified by `npm test -- src/__tests__/cli.test.ts` (32 tests).
