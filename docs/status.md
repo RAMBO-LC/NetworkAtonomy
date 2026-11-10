@@ -22,5 +22,5 @@
 | Task 11: JSON output & schema | VERIFIED BY TEST | `npm test -- src/__tests__/json.test.ts` (34 passed) | |
 | Task 12: --explain output | VERIFIED BY TEST | `npm test -- src/__tests__/cli.test.ts` (32 passed) | |
 | Task 13: exit codes & errors | VERIFIED BY TEST | `npm test -- src/__tests__/cli.test.ts src/__tests__/errors.test.ts` (69 passed) | |
-| Task 14: integration test | NOT STARTED | — | |
+| Task 14: integration test | VERIFIED BY TEST | `npm test -- src/__tests__/integration.test.ts` (25 passed) | local HTTP/HTTPS servers, flag combos, JSON/human output |
 | Task 15: README update | NOT STARTED | — | |
