@@ -15,7 +15,7 @@
 | Task 4: resolver & guard | VERIFIED BY TEST | `npm test -- src/net/__tests__/resolve.test.ts` (29 passed) | |
 | Task 5: DNS timing | VERIFIED BY TEST | `npm test -- src/stages/__tests__/dns.test.ts` (7 passed) | |
 | Task 6: TCP timing | VERIFIED BY TEST | `npm test -- src/stages/__tests__/tcp.test.ts` (4 passed) | |
-| Task 7: TLS timing | NOT STARTED | — | |
+| Task 7: TLS timing | VERIFIED BY TEST | `npm test -- src/stages/__tests__/tls.test.ts` (3 passed) | |
 | Task 8: HTTP TTFB & body timing | NOT STARTED | — | |
 | Task 9: runs & median | NOT STARTED | — | |
 | Task 10: terminal output | NOT STARTED | — | |
