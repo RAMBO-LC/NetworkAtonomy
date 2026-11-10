@@ -5,6 +5,8 @@
  */
 
 import { runProbes, printResults, type AggregatedResults, type ProbeOptions } from "./runner";
+import { validateUrl } from "./url/validate";
+import { resolveHostname, defaultDnsResolver, ResolutionError, BlockedAddressError } from "./net/resolve";
 
 interface CliOptions {
   url: string;
@@ -18,6 +20,17 @@ interface CliOptions {
   explain?: boolean;
   help?: boolean;
 }
+
+/**
+ * Estimated time per stage in milliseconds (used for dry-run estimation).
+ */
+const ESTIMATED_STAGE_MS = {
+  dns: 50,
+  tcp: 100,
+  tls: 150,
+  ttfb: 200,
+  body: 50,
+};
 
 /**
  * Parse command-line arguments.
@@ -181,6 +194,152 @@ function printJson(results: AggregatedResults): void {
 }
 
 /**
+ * Print enhanced explain output showing parsed options, resolved config,
+ * estimated time, and stages that will run.
+ */
+async function printExplainOutput(options: CliOptions): Promise<void> {
+  const runs = options.runs ?? 5;
+  const concurrency = options.concurrency ?? 1;
+  const delayMs = options.delayMs ?? 0;
+  const maxBody = options.maxBody ?? 10 * 1024 * 1024;
+  const insecure = options.insecure ?? false;
+  const timeoutStr = options.timeout ?? "none";
+  const outputFormat = options.json ? "JSON" : "human-readable table";
+
+  // Validate URL first
+  const validation = validateUrl(options.url);
+  if (!validation.ok) {
+    console.log("Would run probes with the following configuration:");
+    console.log(`  URL: ${options.url} (INVALID: ${validation.message})`);
+    console.log(`  Runs: ${runs}`);
+    console.log(`  Concurrency: ${concurrency}`);
+    console.log(`  Delay: ${delayMs}ms`);
+    console.log(`  Max body: ${maxBody} bytes`);
+    console.log(`  Insecure (skip TLS verify): ${insecure}`);
+    console.log(`  Timeout: ${timeoutStr}`);
+    console.log(`  Output format: ${outputFormat}`);
+    return;
+  }
+
+  // Try to resolve hostname for IP display
+  let resolvedIp: string | null = null;
+  let resolvedFamily: string | null = null;
+  let resolutionError: string | null = null;
+
+  try {
+    const resolved = await resolveHostname(validation.hostname, defaultDnsResolver);
+    resolvedIp = resolved.address;
+    resolvedFamily = resolved.family === "ipv4" ? "IPv4" : "IPv6";
+  } catch (error) {
+    if (error instanceof ResolutionError) {
+      resolutionError = `DNS resolution failed: ${error.message}`;
+    } else if (error instanceof BlockedAddressError) {
+      resolutionError = `SSRF guard blocked: ${error.blockedAddresses.join(", ")}`;
+    } else {
+      resolutionError = `Resolution error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  // Parse timeouts for estimation
+  const timeouts = options.timeout ? parseTimeouts(options.timeout) : {};
+
+  // Calculate estimated time
+  const estimatedTimeMs = calculateEstimatedTime(runs, concurrency, delayMs, timeouts);
+
+  // Determine stages that will run
+  const stages = getStagesToRun(validation.scheme);
+
+  console.log("Would run probes with the following configuration:");
+  console.log("");
+  console.log("Parsed CLI Options:");
+  console.log(`  URL: ${options.url}`);
+  console.log(`  Runs: ${runs}`);
+  console.log(`  Concurrency: ${concurrency}`);
+  console.log(`  Delay: ${delayMs}ms`);
+  console.log(`  Max body: ${maxBody} bytes`);
+  console.log(`  Insecure (skip TLS verify): ${insecure}`);
+  console.log(`  Timeout: ${timeoutStr}`);
+  console.log(`  Output format: ${outputFormat}`);
+  console.log("");
+  console.log("Resolved Configuration:");
+  console.log(`  Scheme: ${validation.scheme}`);
+  console.log(`  Hostname: ${validation.hostname}`);
+  console.log(`  Port: ${validation.port}`);
+  if (resolvedIp) {
+    console.log(`  Resolved IP: ${resolvedIp} (${resolvedFamily})`);
+  } else if (resolutionError) {
+    console.log(`  Resolved IP: (could not resolve - ${resolutionError})`);
+  } else {
+    console.log(`  Resolved IP: (unknown)`);
+  }
+  console.log("");
+  console.log("Stages to Run:");
+  for (const stage of stages) {
+    const timeout = timeouts[stage] ?? "default";
+    console.log(`  ${stage.toUpperCase()}: ${timeout === "default" ? "default timeout" : `${timeout}ms timeout`}`);
+  }
+  console.log("");
+  console.log("Estimated Time:");
+  console.log(`  Total: ~${formatEstimatedTime(estimatedTimeMs)}`);
+  console.log(`  (Based on ${runs} run(s), ${concurrency} concurrent, ${delayMs}ms delay between runs)`);
+}
+
+/**
+ * Calculate estimated total time in milliseconds.
+ */
+function calculateEstimatedTime(
+  runs: number,
+  concurrency: number,
+  delayMs: number,
+  timeouts: ProbeOptions["timeouts"]
+): number {
+  // Estimate per-run time based on timeouts or defaults
+  const perRunEstimate =
+    (timeouts.dns ?? ESTIMATED_STAGE_MS.dns) +
+    (timeouts.tcp ?? ESTIMATED_STAGE_MS.tcp) +
+    (timeouts.tls ?? ESTIMATED_STAGE_MS.tls) +
+    (timeouts.ttfb ?? ESTIMATED_STAGE_MS.ttfb) +
+    (timeouts.body ?? ESTIMATED_STAGE_MS.body);
+
+  // With concurrency, runs are batched
+  const batches = Math.ceil(runs / concurrency);
+  const totalRunTime = perRunEstimate * runs; // Sequential time
+  const concurrentRunTime = perRunEstimate * batches; // Concurrent time
+  const totalDelay = delayMs * (runs - 1); // Delay between runs
+
+  // For concurrent runs, delay applies within each batch
+  // This is a simplified estimation
+  return concurrentRunTime + totalDelay;
+}
+
+/**
+ * Get the list of stages that will run based on scheme.
+ */
+function getStagesToRun(scheme: "http" | "https"): string[] {
+  const stages = ["dns", "tcp"];
+  if (scheme === "https") {
+    stages.push("tls");
+  }
+  stages.push("ttfb", "body");
+  return stages;
+}
+
+/**
+ * Format estimated time in human-readable format.
+ */
+function formatEstimatedTime(ms: number): string {
+  if (ms < 1000) {
+    return `${ms}ms`;
+  } else if (ms < 60000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  } else {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = ((ms % 60000) / 1000).toFixed(1);
+    return `${minutes}m ${seconds}s`;
+  }
+}
+
+/**
  * Main CLI entry point.
  */
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
@@ -193,15 +352,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
 
     if (options.explain) {
-      console.log("Would run probes with the following configuration:");
-      console.log(`  URL: ${options.url}`);
-      console.log(`  Runs: ${options.runs ?? 5}`);
-      console.log(`  Concurrency: ${options.concurrency ?? 1}`);
-      console.log(`  Delay: ${options.delayMs ?? 0}ms`);
-      console.log(`  Max body: ${options.maxBody ?? 10 * 1024 * 1024} bytes`);
-      console.log(`  Insecure (skip TLS verify): ${options.insecure ?? false}`);
-      console.log(`  Timeout: ${options.timeout ?? "none"}`);
-      console.log(`  Output format: ${options.json ? "JSON" : "human-readable table"}`);
+      await printExplainOutput(options);
       return 0;
     }
 

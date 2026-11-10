@@ -20,7 +20,7 @@
 | Task 9: Runs & median | VERIFIED BY TEST | `npm test -- src/__tests__/runner.test.ts` (29 passed) | |
 | Task 10: terminal output | VERIFIED BY TEST | `npm test -- src/__tests__/cli.test.ts` (32 passed) | |
 | Task 11: JSON output & schema | VERIFIED BY TEST | `npm test -- src/__tests__/json.test.ts` (34 passed) | |
-| Task 12: --explain output | NOT STARTED | — | |
+| Task 12: --explain output | VERIFIED BY TEST | `npm test -- src/__tests__/cli.test.ts` (32 passed) | |
 | Task 13: exit codes & errors | NOT STARTED | — | |
 | Task 14: integration test | NOT STARTED | — | |
 | Task 15: README update | NOT STARTED | — | |
