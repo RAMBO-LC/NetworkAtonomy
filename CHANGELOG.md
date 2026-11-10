@@ -18,3 +18,4 @@
 - Task 7: TLS timing ([[src/stages/tls.ts]], [[src/stages/__tests__/tls.test.ts]], [[src/fixtures/localhost-cert.pem]]) — 3 unit tests measuring TLS handshake duration (HTTPS > 0, HTTP = 0); verified by `npm test`.
 - Task 8: HTTP TTFB & body timing ([[src/stages/http.ts]], [[src/stages/__tests__/http.test.ts]]) — 10 unit tests measuring HTTP TTFB, body download duration, status code parsing, and maxBody capping; verified by `npm test`.
 - Task 9: Runs orchestration & median ([[src/runner.ts]], [[src/__tests__/runner.test.ts]]) — 29 unit tests covering sequential/concurrent execution, median/min/max stats, partial failures, injected resolver, IPv4/IPv6, delay between runs; verified by `npm test`.
+- Task 10: CLI entry point ([[src/cli.ts]], [[src/__tests__/cli.test.ts]]) — 32 unit tests covering argument parsing, flag validation, explain mode, runProbes integration, JSON/human output, exit codes; verified by `npm test`.
