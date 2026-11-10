@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://networkatonomy.dev/schema/output.json",
+  "title": "Network Atonomy Aggregated Results",
+  "description": "JSON schema for the aggregated network timing probe results output",
+  "type": "object",
+  "required": [
+    "stages",
+    "total",
+    "runsRequested",
+    "runsSuccessful",
+    "runsFailed",
+    "url",
+    "ip",
+    "family",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "stages": {
+      "type": "object",
+      "required": ["dns", "tcp", "tls", "ttfb", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "dns": { "$ref": "#/$defs/stageStats" },
+        "tcp": { "$ref": "#/$defs/stageStats" },
+        "tls": { "$ref": "#/$defs/stageStats" },
+        "ttfb": { "$ref": "#/$defs/stageStats" },
+        "body": { "$ref": "#/$defs/stageStats" }
+      }
+    },
+    "total": { "$ref": "#/$defs/stageStats" },
+    "runsRequested": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of probe runs requested"
+    },
+    "runsSuccessful": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of probe runs that completed successfully"
+    },
+    "runsFailed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of probe runs that failed"
+    },
+    "url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Target URL that was probed"
+    },
+    "ip": {
+      "type": "string",
+      "description": "IP address connected to"
+    },
+    "family": {
+      "type": "string",
+      "enum": ["IPv4", "IPv6"],
+      "description": "Address family of the connected IP"
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Warnings from failed runs (if any)"
+    }
+  },
+  "$defs": {
+    "stageStats": {
+      "type": "object",
+      "required": ["medianMs", "minMs", "maxMs"],
+      "additionalProperties": false,
+      "properties": {
+        "medianMs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Median duration in milliseconds"
+        },
+        "minMs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Minimum duration in milliseconds"
+        },
+        "maxMs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum duration in milliseconds"
+        }
+      }
+    }
+  }
+}
