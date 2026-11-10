@@ -15,3 +15,4 @@
 - Task 4: resolver & guard ([[src/net/resolve.ts]], [[src/net/__tests__/resolve.test.ts]]) — 29 unit tests covering IPv4/IPv6 resolution, IPv4-mapped IPv6 blocking, resolver injection; verified by `npm test`.
 - Task 5: DNS timing ([[src/stages/dns.ts]], [[src/stages/__tests__/dns.test.ts]]) — 7 unit tests measuring resolution duration with injected resolver; verified by `npm test`.
 - Task 6: TCP timing ([[src/stages/tcp.ts]], [[src/stages/__tests__/tcp.test.ts]]) — 4 unit tests measuring connect duration against local ephemeral server; verified by `npm test`.
+- Task 7: TLS timing ([[src/stages/tls.ts]], [[src/stages/__tests__/tls.test.ts]], [[src/fixtures/localhost-cert.pem]]) — 3 unit tests measuring TLS handshake duration (HTTPS > 0, HTTP = 0); verified by `npm test`.
