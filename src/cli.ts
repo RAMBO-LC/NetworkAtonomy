@@ -7,6 +7,18 @@
 import { runProbes, printResults, type AggregatedResults, type ProbeOptions } from "./runner";
 import { validateUrl } from "./url/validate";
 import { resolveHostname, defaultDnsResolver, ResolutionError, BlockedAddressError } from "./net/resolve";
+import {
+  ExitCode,
+  NetworkAtonomyError,
+  InvalidArgsError,
+  DnsFailedError,
+  TcpFailedError,
+  TlsFailedError,
+  HttpFailedError,
+  AllRunsFailedError,
+  InternalError,
+  getExitCode,
+} from "./errors";
 
 interface CliOptions {
   url: string;
@@ -19,6 +31,7 @@ interface CliOptions {
   json?: boolean;
   explain?: boolean;
   help?: boolean;
+  version?: boolean;
 }
 
 /**
@@ -48,25 +61,25 @@ function parseArgs(args: string[]): CliOptions {
         case "runs":
           options.runs = parseInt(value ?? args[++i], 10);
           if (isNaN(options.runs) || options.runs <= 0) {
-            throw new Error("--runs must be a positive integer");
+            throw new InvalidArgsError("--runs must be a positive integer");
           }
           break;
         case "concurrency":
           options.concurrency = parseInt(value ?? args[++i], 10);
           if (isNaN(options.concurrency) || options.concurrency <= 0) {
-            throw new Error("--concurrency must be a positive integer");
+            throw new InvalidArgsError("--concurrency must be a positive integer");
           }
           break;
         case "delay":
           options.delayMs = parseInt(value ?? args[++i], 10);
           if (isNaN(options.delayMs) || options.delayMs < 0) {
-            throw new Error("--delay must be a non-negative integer");
+            throw new InvalidArgsError("--delay must be a non-negative integer");
           }
           break;
         case "max-body":
           options.maxBody = parseInt(value ?? args[++i], 10);
           if (isNaN(options.maxBody) || options.maxBody <= 0) {
-            throw new Error("--max-body must be a positive integer");
+            throw new InvalidArgsError("--max-body must be a positive integer");
           }
           break;
         case "insecure":
@@ -84,12 +97,15 @@ function parseArgs(args: string[]): CliOptions {
         case "help":
           options.help = true;
           break;
+        case "version":
+          options.version = true;
+          break;
         default:
-          throw new Error(`Unknown option: --${flag}`);
+          throw new InvalidArgsError(`Unknown option: --${flag}`);
       }
     } else if (arg.startsWith("-")) {
       // Short flags not supported
-      throw new Error(`Short flags not supported: ${arg}. Use --${arg.slice(1)} instead.`);
+      throw new InvalidArgsError(`Short flags not supported: ${arg}. Use --${arg.slice(1)} instead.`);
     } else {
       positionalArgs.push(arg);
     }
@@ -97,15 +113,20 @@ function parseArgs(args: string[]): CliOptions {
 
   if (options.help) {
     console.log(printHelp());
-    return { ...options, _exitCode: 0 } as CliOptions & { _exitCode: number };
+    return { ...options, _exitCode: ExitCode.OK } as CliOptions & { _exitCode: number };
+  }
+
+  if (options.version) {
+    console.log("1.0.0"); // Version would typically come from package.json
+    return { ...options, _exitCode: ExitCode.OK } as CliOptions & { _exitCode: number };
   }
 
   if (positionalArgs.length === 0) {
-    throw new Error("Missing required argument: URL");
+    throw new InvalidArgsError("Missing required argument: URL");
   }
 
   if (positionalArgs.length > 1) {
-    throw new Error("Too many positional arguments. Expected only URL.");
+    throw new InvalidArgsError("Too many positional arguments. Expected only URL.");
   }
 
   options.url = positionalArgs[0];
@@ -126,7 +147,7 @@ function parseTimeouts(timeoutStr: string): ProbeOptions["timeouts"] {
       const [stage, value] = pair.split("=");
       const ms = parseInt(value, 10);
       if (isNaN(ms) || ms <= 0) {
-        throw new Error(`Invalid timeout value for ${stage}: ${value}`);
+        throw new InvalidArgsError(`Invalid timeout value for ${stage}: ${value}`);
       }
       switch (stage) {
         case "dns":
@@ -137,14 +158,14 @@ function parseTimeouts(timeoutStr: string): ProbeOptions["timeouts"] {
           timeouts[stage] = ms;
           break;
         default:
-          throw new Error(`Unknown timeout stage: ${stage}`);
+          throw new InvalidArgsError(`Unknown timeout stage: ${stage}`);
       }
     }
   } else {
     // Apply same timeout to all stages
     const ms = parseInt(timeoutStr, 10);
     if (isNaN(ms) || ms <= 0) {
-      throw new Error(`Invalid timeout value: ${timeoutStr}`);
+      throw new InvalidArgsError(`Invalid timeout value: ${timeoutStr}`);
     }
     timeouts.dns = ms;
     timeouts.tcp = ms;
@@ -346,14 +367,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   try {
     const options = parseArgs(argv);
 
-    // Handle help flag which returns early with exit code
+    // Handle help/version flags which return early with exit code
     if ("_exitCode" in options) {
       return options._exitCode as number;
     }
 
     if (options.explain) {
       await printExplainOutput(options);
-      return 0;
+      return ExitCode.OK;
     }
 
     const probeOptions: Omit<ProbeOptions, "url"> = {
@@ -374,12 +395,80 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
 
     // Exit with non-zero if any runs failed
-    return results.runsFailed > 0 ? 1 : 0;
+    return results.runsFailed > 0 ? ExitCode.ALL_RUNS_FAILED : ExitCode.OK;
   } catch (error) {
+    const exitCode = mapErrorToExitCode(error);
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Error: ${message}`);
-    return 1;
+    return exitCode;
   }
+}
+
+/**
+ * Maps an error to its corresponding ExitCode based on error type or message content.
+ */
+function mapErrorToExitCode(error: unknown): ExitCode {
+  // Check for our typed errors first
+  if (error instanceof NetworkAtonomyError) {
+    return error.exitCode;
+  }
+
+  // Map errors from lower layers based on message content
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+
+    // DNS resolution errors
+    if (error instanceof ResolutionError || message.includes("dns resolution failed") || message.includes("no addresses found")) {
+      return ExitCode.DNS_FAILED;
+    }
+
+    // SSRF/blocked address errors
+    if (error instanceof BlockedAddressError || message.includes("ssrf guard blocked")) {
+      return ExitCode.DNS_FAILED;
+    }
+
+    // TCP connection errors
+    if (message.includes("connection refused") ||
+        message.includes("econnrefused") ||
+        message.includes("etimedout") ||
+        message.includes("timeout") ||
+        message.includes("connect") ||
+        message.includes("tcp") ||
+        message.includes("socket")) {
+      // Check if it's specifically a TLS error first
+      if (message.includes("tls") || message.includes("ssl") || message.includes("certificate") || message.includes("handshake")) {
+        return ExitCode.TLS_FAILED;
+      }
+      // Check if it's an HTTP error
+      if (message.includes("http") || message.includes("ttfb") || message.includes("body") || message.includes("response") || message.includes("status")) {
+        return ExitCode.HTTP_FAILED;
+      }
+      return ExitCode.TCP_FAILED;
+    }
+
+    // TLS errors
+    if (message.includes("tls") || message.includes("ssl") || message.includes("certificate") || message.includes("handshake") || message.includes("secureconnect")) {
+      return ExitCode.TLS_FAILED;
+    }
+
+    // HTTP errors
+    if (message.includes("http") || message.includes("ttfb") || message.includes("body download") || message.includes("response") || message.includes("status code") || message.includes("headers")) {
+      return ExitCode.HTTP_FAILED;
+    }
+
+    // All runs failed
+    if (message.includes("all runs failed")) {
+      return ExitCode.ALL_RUNS_FAILED;
+    }
+
+    // Invalid args (validation errors)
+    if (message.includes("invalid") || message.includes("missing required") || message.includes("too many") || message.includes("unknown option") || message.includes("short flags") || message.includes("must be a positive") || message.includes("must be a non-negative")) {
+      return ExitCode.INVALID_ARGS;
+    }
+  }
+
+  // Default to internal error for unknown errors
+  return ExitCode.INTERNAL_ERROR;
 }
 
 // Run if executed directly

@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { main } from "../cli";
 import { runProbes, printResults, formatMs, type AggregatedResults } from "../runner";
+import { ExitCode } from "../errors";
 
 // Mock runProbes
 vi.mock("../runner", async (importOriginal) => {
@@ -47,12 +48,12 @@ describe("cli - argument parsing", () => {
 
   it("requires a URL argument", async () => {
     const code = await main([]);
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.INVALID_ARGS);
   });
 
   it("rejects multiple positional arguments", async () => {
     const code = await main(["http://a.com", "http://b.com"]);
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.INVALID_ARGS);
   });
 
   it("parses --runs option", async () => {
@@ -115,43 +116,43 @@ describe("cli - argument parsing", () => {
 
   it("rejects invalid --runs value", async () => {
     const code = await main(["http://example.com", "--runs", "invalid"]);
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.INVALID_ARGS);
   });
 
   it("rejects zero --runs value", async () => {
     const code = await main(["http://example.com", "--runs", "0"]);
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.INVALID_ARGS);
   });
 
   it("rejects invalid --concurrency value", async () => {
     const code = await main(["http://example.com", "--concurrency", "invalid"]);
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.INVALID_ARGS);
   });
 
   it("rejects negative --delay value", async () => {
     const code = await main(["http://example.com", "--delay", "-100"]);
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.INVALID_ARGS);
   });
 
   it("rejects invalid --max-body value", async () => {
     const code = await main(["http://example.com", "--max-body", "invalid"]);
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.INVALID_ARGS);
   });
 
   it("rejects unknown option", async () => {
     const code = await main(["http://example.com", "--unknown"]);
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.INVALID_ARGS);
   });
 
   it("rejects short flags", async () => {
     const code = await main(["http://example.com", "-r", "5"]);
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.INVALID_ARGS);
   });
 
   it("supports --help flag", async () => {
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await main(["--help"]);
-    expect(code).toBe(0);
+    expect(code).toBe(ExitCode.OK);
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Network Atonomy"));
     consoleSpy.mockRestore();
   });
@@ -159,7 +160,23 @@ describe("cli - argument parsing", () => {
   it("supports --help with URL", async () => {
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await main(["http://example.com", "--help"]);
-    expect(code).toBe(0);
+    expect(code).toBe(ExitCode.OK);
+    consoleSpy.mockRestore();
+  });
+
+  it("supports --version flag", async () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const code = await main(["--version"]);
+    expect(code).toBe(ExitCode.OK);
+    expect(consoleSpy).toHaveBeenCalledWith("1.0.0");
+    consoleSpy.mockRestore();
+  });
+
+  it("supports --version with URL", async () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const code = await main(["http://example.com", "--version"]);
+    expect(code).toBe(ExitCode.OK);
+    expect(consoleSpy).toHaveBeenCalledWith("1.0.0");
     consoleSpy.mockRestore();
   });
 });
@@ -168,7 +185,7 @@ describe("cli - explain mode", () => {
   it("shows configuration without running probes", async () => {
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await main(["http://example.com", "--explain"]);
-    expect(code).toBe(0);
+    expect(code).toBe(ExitCode.OK);
     expect(mockRunProbesFn).not.toHaveBeenCalled();
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Would run probes"));
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("URL: http://example.com"));
@@ -229,15 +246,15 @@ describe("cli - runProbes integration", () => {
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(0);
+    expect(code).toBe(ExitCode.OK);
   });
 
-  it("returns exit code 1 when runs failed", async () => {
+  it("returns exit code ALL_RUNS_FAILED when runs failed", async () => {
     mockRunProbesFn.mockResolvedValue(createMockResults({ runsFailed: 2, runsSuccessful: 3 }));
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.ALL_RUNS_FAILED);
   });
 
   it("prints JSON when --json flag is set", async () => {
@@ -252,12 +269,12 @@ describe("cli - runProbes integration", () => {
     consoleSpy.mockRestore();
   });
 
-  it("handles runProbes error and returns exit code 1", async () => {
+  it("handles runProbes error and returns exit code", async () => {
     mockRunProbesFn.mockRejectedValue(new Error("DNS resolution failed"));
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(1);
+    expect(code).toBe(ExitCode.DNS_FAILED);
   });
 
   it("prints error message on failure", async () => {
@@ -315,5 +332,123 @@ describe("cli - printResults output (real printResults)", () => {
     await main(["http://example.com"]);
 
     expect(consoleSpy).toHaveBeenCalledWith("Warning: 2 of 5 runs failed.");
+  });
+});
+
+describe("cli - exit code mapping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns DNS_FAILED for DNS resolution errors", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("DNS resolution failed for example.com: no addresses found"));
+
+    const code = await main(["http://example.com"]);
+
+    expect(code).toBe(ExitCode.DNS_FAILED);
+  });
+
+  it("returns DNS_FAILED for SSRF blocked addresses", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("SSRF guard blocked example.com: 127.0.0.1"));
+
+    const code = await main(["http://example.com"]);
+
+    expect(code).toBe(ExitCode.DNS_FAILED);
+  });
+
+  it("returns TCP_FAILED for connection refused", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("Connection refused"));
+
+    const code = await main(["http://example.com"]);
+
+    expect(code).toBe(ExitCode.TCP_FAILED);
+  });
+
+  it("returns TCP_FAILED for connection timeout", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("ETIMEDOUT"));
+
+    const code = await main(["http://example.com"]);
+
+    expect(code).toBe(ExitCode.TCP_FAILED);
+  });
+
+  it("returns TLS_FAILED for TLS handshake errors", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("TLS handshake failed: certificate verify failed"));
+
+    const code = await main(["https://example.com"]);
+
+    expect(code).toBe(ExitCode.TLS_FAILED);
+  });
+
+  it("returns TLS_FAILED for SSL errors", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("SSL error: self signed certificate"));
+
+    const code = await main(["https://example.com"]);
+
+    expect(code).toBe(ExitCode.TLS_FAILED);
+  });
+
+  it("returns HTTP_FAILED for HTTP response errors", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("HTTP response error: 500 Internal Server Error"));
+
+    const code = await main(["http://example.com"]);
+
+    expect(code).toBe(ExitCode.HTTP_FAILED);
+  });
+
+  it("returns HTTP_FAILED for TTFB errors", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("TTFB timeout"));
+
+    const code = await main(["http://example.com"]);
+
+    expect(code).toBe(ExitCode.HTTP_FAILED);
+  });
+
+  it("returns HTTP_FAILED for body download errors", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("Body download failed: socket closed"));
+
+    const code = await main(["http://example.com"]);
+
+    expect(code).toBe(ExitCode.HTTP_FAILED);
+  });
+
+  it("returns ALL_RUNS_FAILED when all runs fail", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("All runs failed with unknown error"));
+
+    const code = await main(["http://example.com"]);
+
+    expect(code).toBe(ExitCode.ALL_RUNS_FAILED);
+  });
+
+  it("returns INVALID_ARGS for validation errors", async () => {
+    mockRunProbesFn.mockRejectedValue(new Error("Invalid URL: missing scheme"));
+
+    const code = await main(["invalid-url"]);
+
+    expect(code).toBe(ExitCode.INVALID_ARGS);
+  });
+
+  it("prints errors to stderr, not stdout", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockRunProbesFn.mockRejectedValue(new Error("Test error"));
+
+    await main(["http://example.com"]);
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Error: Test error");
+    expect(consoleLogSpy).not.toHaveBeenCalledWith(expect.stringContaining("Error:"));
+    consoleErrorSpy.mockRestore();
+    consoleLogSpy.mockRestore();
+  });
+
+  it("prints successful results to stdout", async () => {
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockRunProbesFn.mockResolvedValue(createMockResults());
+
+    await main(["http://example.com"]);
+
+    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("Target:"));
+    expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("Runs: 5 successful runs"));
+    consoleLogSpy.mockRestore();
   });
 });
