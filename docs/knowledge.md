@@ -19,6 +19,7 @@
 | DNS timing: `performance.now()` before `resolver()`, stop after all addresses returned, injectable resolver for testability | https://nodejs.org/api/perf_hooks.html | 2026-11-09 |
 | TCP timing: `performance.now()` before `net.connect()`, stop on `'connect'` event; socket returned for TLS wrap | https://nodejs.org/api/net.html | 2026-11-09 |
 | TLS timing: `performance.now()` before `tls.connect({ socket, servername })`, stop on `'secureConnect'`; HTTP returns 0 | https://nodejs.org/api/tls.html | 2026-11-09 |
+| HTTP timing: `performance.now()` TTFB from request write to first response byte; body from first byte to stream 'end'; maxBody cap stops reading | https://nodejs.org/api/http.html | 2026-11-09 |
 | `npm ci` installs from lockfile; `vitest run` executes tests with globals; `tsc --noEmit` typechecks without emit | https://docs.npmjs.com/cli/v10/commands/npm-ci, https://vitest.dev/config/, https://www.typescriptlang.org/docs/handbook/compiler-options.html | 2026-11-09 |
 
 ## Open Questions
