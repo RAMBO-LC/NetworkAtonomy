@@ -49,7 +49,14 @@ vi.mock("../net/resolve", () => ({
   resolveHostname: vi.fn(),
   defaultDnsResolver: vi.fn(),
   ResolutionError: class extends Error { constructor(h: string) { super(`DNS resolution failed for ${h}`); this.name = "ResolutionError"; } },
-  BlockedAddressError: class extends Error { constructor(h: string, addrs: string[]) { super(`SSRF guard blocked ${h}: ${addrs.join(", ")}`); this.name = "BlockedAddressError"; this.blockedAddresses = addrs; } },
+  BlockedAddressError: class extends Error {
+    public readonly blockedAddresses: string[];
+    constructor(h: string, addrs: string[]) {
+      super(`SSRF guard blocked ${h}: ${addrs.join(", ")}`);
+      this.name = "BlockedAddressError";
+      this.blockedAddresses = addrs;
+    }
+  },
 }));
 
 // Hoisted mock for validateUrl
@@ -208,7 +215,7 @@ describe("runner - runProbes orchestration", () => {
     let dnsCallCount = 0;
     mockMeasureDns.mockImplementation(async () => {
       const durations = [10, 20, 30];
-      const duration = durations[dnsCallCount++];
+      const duration = durations[dnsCallCount++]!;
       advancePerformanceNow(duration);
       return { durationMs: duration, addresses: { ipv4: ["1.2.3.4"], ipv6: [] } };
     });
@@ -225,7 +232,7 @@ describe("runner - runProbes orchestration", () => {
     let dnsCallCount = 0;
     mockMeasureDns.mockImplementation(async () => {
       const durations = [10, 20, 30, 40];
-      const duration = durations[dnsCallCount++];
+      const duration = durations[dnsCallCount++]!;
       advancePerformanceNow(duration);
       return { durationMs: duration, addresses: { ipv4: ["1.2.3.4"], ipv6: [] } };
     });
@@ -292,7 +299,7 @@ describe("runner - runProbes orchestration", () => {
   });
 
   it("respects delay between runs", async () => {
-    const delaySpy = vi.spyOn(global, "setTimeout").mockImplementation((cb) => cb() as any);
+    const delaySpy = vi.spyOn(globalThis, "setTimeout").mockImplementation((cb) => cb() as any);
 
     await runProbes("http://example.com", { runs: 2, delayMs: 100 });
 
