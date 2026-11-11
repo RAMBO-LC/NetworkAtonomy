@@ -25,3 +25,4 @@
 | Task 14: integration test | VERIFIED BY TEST | `npm test -- src/__tests__/integration.test.ts` (25 passed) | local HTTP/HTTPS servers, flag combos, JSON/human output |
 | Task 15: README update | VERIFIED BY TEST | `cat README.md` (valid content) | comprehensive CLI documentation |
 | Bug Investigation: TTFB timing | VERIFIED BY TEST | `npm test -- src/__tests__/bug-ttfb-investigation.test.ts` (4 passed) | TTFB bug fixed, redirect handling verified, curl comparison done, external google.com tests done |
+| Verification: post-merge | VERIFIED BY TEST | `npm test` (292 passed) | Security guard verified via mutation test, error hierarchy class-based, ExitCode matches spec, dev/build scripts added |

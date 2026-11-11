@@ -153,7 +153,7 @@ export interface ProbeOptions {
 /**
  * Result of a single run attempt (success or failure).
  */
-interface RunAttemptResult {
+export interface RunAttemptResult {
   success: boolean;
   timing?: RunTimingResult & { hops: HopTimingResult[] };
   error?: Error;
@@ -191,7 +191,7 @@ export function calculateStageStats(values: number[]): StageStats {
 /**
  * Execute a single probe run with redirect following.
  */
-async function executeSingleRun(
+export async function executeSingleRun(
   options: ProbeOptions,
   initialResolvedHost: ResolvedHost,
 ): Promise<RunAttemptResult> {

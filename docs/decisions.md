@@ -153,3 +153,27 @@ Each entry has a status, reason, and rejected option. Never edit old entries to 
 - **Status:** Accepted
 - **Reason:** The SDK must enforce the same SSRF guard. There is no option to disable it.
 - **Rejected:** An `allowPrivate` option on the SDK; any bypass flag.
+
+## D-V1: Class-based error hierarchy replacing message-text matching
+
+- **Status:** Accepted
+- **Reason:** Error mapping in `mapErrorToExitCode` now uses `instanceof` checks and an `exitCode` property on each error class. This guarantees stable exit codes regardless of error message changes. Every error class maps to exactly one exit code.
+- **Rejected:** Message string matching (e.g., `"timeout" in message`) which could mis-map errors like TTFB timeout as `TIMEOUT` instead of `NETWORK_FAILURE`.
+
+## D-V2: SSRF guard verified by mutation test
+
+- **Status:** Accepted
+- **Reason:** The blocked-redirect test uses spies on `resolveHostname` and `node:net.connect` to prove no socket is created to `10.0.0.1`. A mutation test (removing the guard call on the redirect path in `runner.ts`) caused the test to hang (real connect to 10.0.0.1), proving the test is valid and the guard is necessary.
+- **Rejected:** Assert-only tests without mutation verification.
+
+## D-V3: Partial failures behavior matches spec §7
+
+- **Status:** Accepted
+- **Reason:** Current behavior: 4-of-5 successful runs exits 0 with warnings (`Warning: 1 of 5 runs failed`). All 5 runs fail → exits `NETWORK_FAILURE` (3). This matches spec §7: "If at least one run succeeds, exit 0 with a warning listing the failed runs. If all runs fail, exit with the appropriate error code."
+- **Rejected:** Changing behavior without spec deviation.
+
+## D-V4: Build and dev scripts added to package.json
+
+- **Status:** Accepted
+- **Reason:** `build` compiles TypeScript to `dist/` with existing tsconfig. `dev` runs `src/cli.ts` with `tsx` for direct argument passthrough. Verified `npm run build` succeeds and produces working `dist/cli.js`.
+- **Rejected:** No build script (unverifiable distribution); complex build tooling.

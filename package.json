@@ -6,10 +6,18 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit false --outDir dist",
+    "dev": "tsx src/cli.ts"
   },
   "devDependencies": {
+    "@types/blessed": "^0.1.27",
+    "tsx": "^4.19.0",
     "typescript": "^5.9.3",
     "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "blessed": "^0.1.81",
+    "blessed-contrib": "^4.11.0"
   }
 }
