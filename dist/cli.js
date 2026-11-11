@@ -25,33 +25,29 @@ function parseArgs(args) {
     let positionalArgs = [];
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
-        if (!arg)
-            continue;
         if (arg.startsWith("--")) {
             const [flag, value] = arg.slice(2).split("=");
-            if (!flag)
-                continue;
             switch (flag) {
                 case "runs":
-                    options.runs = parseInt(value ?? args[++i] ?? "", 10);
+                    options.runs = parseInt(value ?? args[++i], 10);
                     if (isNaN(options.runs) || options.runs <= 0) {
                         throw new InvalidArgsError("--runs must be a positive integer");
                     }
                     break;
                 case "concurrency":
-                    options.concurrency = parseInt(value ?? args[++i] ?? "", 10);
+                    options.concurrency = parseInt(value ?? args[++i], 10);
                     if (isNaN(options.concurrency) || options.concurrency <= 0) {
                         throw new InvalidArgsError("--concurrency must be a positive integer");
                     }
                     break;
                 case "delay":
-                    options.delayMs = parseInt(value ?? args[++i] ?? "", 10);
+                    options.delayMs = parseInt(value ?? args[++i], 10);
                     if (isNaN(options.delayMs) || options.delayMs < 0) {
                         throw new InvalidArgsError("--delay must be a non-negative integer");
                     }
                     break;
                 case "max-body":
-                    options.maxBody = parseInt(value ?? args[++i] ?? "", 10);
+                    options.maxBody = parseInt(value ?? args[++i], 10);
                     if (isNaN(options.maxBody) || options.maxBody <= 0) {
                         throw new InvalidArgsError("--max-body must be a positive integer");
                     }
@@ -60,7 +56,7 @@ function parseArgs(args) {
                     options.insecure = true;
                     break;
                 case "timeout":
-                    options.timeout = value ?? args[++i] ?? "";
+                    options.timeout = value ?? args[++i];
                     break;
                 case "json":
                     options.json = true;
@@ -82,6 +78,9 @@ function parseArgs(args) {
                     if (isNaN(options.maxRedirects) || options.maxRedirects < 0) {
                         throw new InvalidArgsError("--max-redirects must be a non-negative integer");
                     }
+                    break;
+                case "tui":
+                    options.tui = true;
                     break;
                 default:
                     throw new InvalidArgsError(`Unknown option: --${flag}`);
@@ -121,23 +120,21 @@ function parseTimeouts(timeoutStr) {
     if (timeoutStr.includes("=")) {
         const pairs = timeoutStr.split(",");
         for (const pair of pairs) {
-            if (!pair)
-                continue;
-            const [stage, value] = pair.split("=");
-            const ms = parseInt(value ?? "", 10);
+            const parts = pair.split("=");
+            const stage = parts[0];
+            const value = parts[1];
+            if (!stage || !value) {
+                throw new InvalidArgsError(`Invalid timeout format: ${pair}`);
+            }
+            const ms = parseInt(value, 10);
             if (isNaN(ms) || ms <= 0) {
                 throw new InvalidArgsError(`Invalid timeout value for ${stage}: ${value}`);
             }
-            switch (stage) {
-                case "dns":
-                case "tcp":
-                case "tls":
-                case "ttfb":
-                case "body":
-                    timeouts[stage] = ms;
-                    break;
-                default:
-                    throw new InvalidArgsError(`Unknown timeout stage: ${stage}`);
+            if (["dns", "tcp", "tls", "ttfb", "body"].includes(stage)) {
+                timeouts[stage] = ms;
+            }
+            else {
+                throw new InvalidArgsError(`Unknown timeout stage: ${stage}`);
             }
         }
     }
@@ -176,6 +173,7 @@ Options:
   --timeout <ms>       Timeout for all stages in milliseconds
   --timeout <spec>     Per-stage timeouts (e.g., "dns=1000,tcp=2000,ttfb=5000")
   --json               Output results as JSON
+  --tui                Launch interactive TUI dashboard
   --explain            Show what would be done without executing
   --help               Show this help message
 
@@ -193,10 +191,6 @@ Examples:
 function printJson(results) {
     console.log(JSON.stringify(results, null, 2));
 }
-/**
- * Print enhanced explain output showing parsed options, resolved config,
- * estimated time, and stages that will run.
- */
 async function printExplainOutput(options) {
     const runs = options.runs ?? 5;
     const concurrency = options.concurrency ?? 1;
@@ -275,7 +269,7 @@ async function printExplainOutput(options) {
     console.log("");
     console.log("Stages to Run:");
     for (const stage of stages) {
-        const timeout = timeouts?.[stage] ?? "default";
+        const timeout = timeouts[stage] ?? "default";
         console.log(`  ${stage.toUpperCase()}: ${timeout === "default" ? "default timeout" : `${timeout}ms timeout`}`);
     }
     console.log("");
@@ -288,11 +282,11 @@ async function printExplainOutput(options) {
  */
 function calculateEstimatedTime(runs, concurrency, delayMs, timeouts) {
     // Estimate per-run time based on timeouts or defaults
-    const perRunEstimate = (timeouts?.dns ?? ESTIMATED_STAGE_MS.dns) +
-        (timeouts?.tcp ?? ESTIMATED_STAGE_MS.tcp) +
-        (timeouts?.tls ?? ESTIMATED_STAGE_MS.tls) +
-        (timeouts?.ttfb ?? ESTIMATED_STAGE_MS.ttfb) +
-        (timeouts?.body ?? ESTIMATED_STAGE_MS.body);
+    const perRunEstimate = (timeouts.dns ?? ESTIMATED_STAGE_MS.dns) +
+        (timeouts.tcp ?? ESTIMATED_STAGE_MS.tcp) +
+        (timeouts.tls ?? ESTIMATED_STAGE_MS.tls) +
+        (timeouts.ttfb ?? ESTIMATED_STAGE_MS.ttfb) +
+        (timeouts.body ?? ESTIMATED_STAGE_MS.body);
     // With concurrency, runs are batched
     const batches = Math.ceil(runs / concurrency);
     const totalRunTime = perRunEstimate * runs; // Sequential time
@@ -341,6 +335,25 @@ export async function main(argv = process.argv.slice(2)) {
         }
         if (options.explain) {
             await printExplainOutput(options);
+            return ExitCode.OK;
+        }
+        if (options.tui) {
+            console.error("TUI mode enabled, importing tui module...");
+            const { runTUI } = await import("./tui");
+            console.error("runTUI imported, calling...");
+            const timeouts = options.timeout ? parseTimeouts(options.timeout) : undefined;
+            await runTUI({
+                url: options.url,
+                runs: options.runs ?? 5,
+                concurrency: options.concurrency ?? 1,
+                delayMs: options.delayMs ?? 0,
+                maxBody: options.maxBody ?? 10 * 1024 * 1024,
+                rejectUnauthorized: options.insecure ? false : true,
+                timeouts,
+                allowPrivate: options.allowPrivate,
+                maxRedirects: options.maxRedirects ?? 5,
+            });
+            console.error("runTUI returned");
             return ExitCode.OK;
         }
         const probeOptions = {

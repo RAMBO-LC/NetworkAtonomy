@@ -105,6 +105,10 @@ export interface HopResult {
   url: string;
   /** HTTP status code for this hop. */
   statusCode: number;
+  /** The IP address connected to for this hop. */
+  ip: string;
+  /** Address family (IPv4 or IPv6). */
+  family: "IPv4" | "IPv6";
   /** Per-stage statistics for this hop. */
   stages: {
     dns: StageStats;
@@ -508,6 +512,8 @@ export async function runProbes(
   const aggregatedHops: HopResult[] = firstRunHops.map((hop) => ({
     url: hop.url,
     statusCode: hop.statusCode,
+    ip: hop.ip,
+    family: hop.family === "ipv4" ? "IPv4" : "IPv6",
     stages: {
       dns: { medianMs: hop.dnsMs, minMs: hop.dnsMs, maxMs: hop.dnsMs },
       tcp: { medianMs: hop.tcpMs, minMs: hop.tcpMs, maxMs: hop.tcpMs },

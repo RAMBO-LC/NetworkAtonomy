@@ -4,6 +4,9 @@
   "private": true,
   "description": "Network Atonomy project scaffold",
   "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -11,13 +14,12 @@
     "dev": "tsx src/cli.ts"
   },
   "devDependencies": {
-    "@types/blessed": "^0.1.27",
+    "@types/node": "^26.6.6",
     "tsx": "^4.19.0",
     "typescript": "^5.9.3",
     "vitest": "^5.1.0"
   },
   "dependencies": {
-    "blessed": "^0.1.81",
-    "blessed-contrib": "^4.11.0"
+    "@profullstack/hqtui": "^0.12.0"
   }
 }

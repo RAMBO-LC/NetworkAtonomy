@@ -4,8 +4,14 @@
 
 ## Verified Facts
 
-| Fact | Source URL | Date Checked |
+|| Fact | Source URL | Date Checked ||
 |------|-----------|-------------|
+| @profullstack/hqtui@0.12.0 runtime dependencies: empty (zero transitive deps) | https://www.npmjs.com/package/@profullstack/hqtui/v/0.12.0 | 2026-11-11 |
+| @profullstack/hqtui license: MIT | https://github.com/profullstack/hqtui/blob/main/LICENSE | 2026-11-11 |
+| @profullstack/hqtui supports headless rendering via `renderToText` for TTY-free unit tests | https://github.com/profullstack/hqtui/blob/main/README.md | 2026-11-11 |
+| @profullstack/hqtui provides terminal restore on Ctrl-C / process exit via `app.stop()` | https://github.com/profullstack/hqtui/blob/main/README.md | 2026-11-11 |
+| @profullstack/hqtui minimum Node.js version: >= 22.6 | https://github.com/profullstack/hqtui/blob/main/package.json | 2026-11-11 |
+| @profullstack/hqtui widget API: panel, meters, sparkline, keyValues, statusBar, grid layout | https://github.com/profullstack/hqtui/blob/main/README.md | 2026-11-11 |
 | Node.js `performance.now()` provides high-resolution timestamps | https://nodejs.org/api/perf_hooks.html | 2026-11-09 |
 | `dns.promises.resolve4()` / `resolve6()` bypass OS getaddrinfo cache | https://nodejs.org/api/dns.html | 2026-11-09 |
 | `net.connect()` emits `'connect'` on TCP handshake complete | https://nodejs.org/api/net.html | 2026-11-09 |

@@ -44,7 +44,7 @@ export function calculateStageStats(values) {
 /**
  * Execute a single probe run with redirect following.
  */
-async function executeSingleRun(options, initialResolvedHost) {
+export async function executeSingleRun(options, initialResolvedHost) {
     const { url: initialUrl, maxBody = 10 * 1024 * 1024, rejectUnauthorized = true, maxRedirects = 5 } = options;
     const maxHops = maxRedirects;
     let currentUrl = initialUrl;
@@ -311,6 +311,8 @@ export async function runProbes(inputUrl, options = {}) {
     const aggregatedHops = firstRunHops.map((hop) => ({
         url: hop.url,
         statusCode: hop.statusCode,
+        ip: hop.ip,
+        family: hop.family === "ipv4" ? "IPv4" : "IPv6",
         stages: {
             dns: { medianMs: hop.dnsMs, minMs: hop.dnsMs, maxMs: hop.dnsMs },
             tcp: { medianMs: hop.tcpMs, minMs: hop.tcpMs, maxMs: hop.tcpMs },

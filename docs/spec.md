@@ -6,10 +6,36 @@ All claims in this document are marked as **VERIFIED** (with source URL and date
 
 ---
 
+## 13. Terminal UI (TUI) — `--tui` Flag
+
+When `--tui` is passed, `reqanatomy` launches an interactive terminal dashboard built on **@profullstack/hqtui** (pinned to 0.12.0). — **PROPOSED**
+
+### Requirements
+- Node.js >= 22.6 (see `engines` in `package.json`). — **PROPOSED**
+- The TUI adapter in `src/tui/adapter.ts` is the **only** file that imports `@profullstack/hqtui`. — **PROPOSED**
+- All widgets (panels, meters, sparklines, key/values, tree, status bar) are created through the adapter. — **PROPOSED**
+- Headless testing uses `renderToText` — no TTY required. — **PROPOSED**
+- Terminal restore on Ctrl+C / SIGTERM / uncaught exception is handled by the library. — **PROPOSED**
+
+### Layout
+The dashboard uses a responsive grid with two columns (2fr, 1fr) and two rows (fixed height for stage meters, 1fr for details). — **PROPOSED**
+
+| Region | Widget | Content |
+|--------|--------|---------|
+| Top-left (2fr) | `panel` + `meters` | Stage bars (DNS, TCP, TLS, TTFB, Body) with live median/min/max |
+| Top-right (1fr) | `panel` + `keyValues` | TLS info, certificate, response status, redirect hops |
+| Bottom (full width) | `panel` + `sparkline`/`graph` | History of totals across runs; jitter range bar (custom) |
+| Footer | `statusBar` | Run status, keys hint (q/Quit, r/Restart, j/Down, k/Up) |
+
+### Key Mapping (D-UI5)
+The library's normalized input is mapped to actions: `q`/`Q` → quit, `r` → restart, `j`/`Down` → next hop, `k`/`Up` → prev hop, `Space` → pause/resume. — **PROPOSED**
+
+---
+
 ## 1. CLI Usage & Arguments
 
 ### Usage Syntax
-`reqanatomy <url> [--runs N] [--explain] [--json]` — **PROPOSED**
+`reqanatomy <url> [--runs N] [--explain] [--json] [--tui]` — **PROPOSED**
 
 ### Flags & Options
 | Flag | Short | Default | Allowed Values | Description | Status |
@@ -18,6 +44,7 @@ All claims in this document are marked as **VERIFIED** (with source URL and date
 | `--runs` | `-n` | 5 | Integer ≥ 1 | Number of probe runs to execute. | PROPOSED |
 | `--explain` | `-e` | `false` | Boolean | Appends rule-based diagnosis of the measured stages. | PROPOSED |
 | `--json` | `-j` | `false` | Boolean | Emits machine-readable JSON output instead of plain text. | PROPOSED |
+| `--tui` | — | `false` | Boolean | Launch interactive terminal dashboard (requires Node >= 22.6). | PROPOSED |
 | `--max-redirects` | — | 5 | Integer ≥ 0 | Maximum redirect hops followed. | PROPOSED |
 
 ### Invalid Input Behavior
@@ -39,6 +66,9 @@ All claims in this document are marked as **VERIFIED** (with source URL and date
 | `4` | Timeout | Any stage timed out exceeding configured limits. | PROPOSED |
 | `7` | Redirect Loop | A redirect target repeats a URL already visited in this run. | PROPOSED |
 | `8` | Too Many Redirects | The number of redirect hops exceeds `--max-redirects`. | PROPOSED |
+
+### Runtime Requirements
+- **Node.js >= 22.6** — Required for `@profullstack/hqtui` (TUI mode). See `engines` in `package.json`. — **PROPOSED**
 
 ---
 

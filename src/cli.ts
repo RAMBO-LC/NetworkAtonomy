@@ -156,19 +156,24 @@ function parseArgs(args: string[]): CliOptions {
  * Parse timeout string into per-stage timeouts.
  * Format: "dns=1000,tcp=2000,tls=3000,ttfb=5000,body=10000" or just "5000" for all stages.
  */
-function parseTimeouts(timeoutStr: string): ProbeOptions["timeouts"] {
-  const timeouts: ProbeOptions["timeouts"] = {};
+function parseTimeouts(timeoutStr: string): { dns?: number; tcp?: number; tls?: number; ttfb?: number; body?: number } {
+  const timeouts: { dns?: number; tcp?: number; tls?: number; ttfb?: number; body?: number } = {};
 
   if (timeoutStr.includes("=")) {
     const pairs = timeoutStr.split(",");
     for (const pair of pairs) {
-      const [stage, value] = pair.split("=");
+      const parts = pair.split("=");
+      const stage = parts[0];
+      const value = parts[1];
+      if (!stage || !value) {
+        throw new InvalidArgsError(`Invalid timeout format: ${pair}`);
+      }
       const ms = parseInt(value, 10);
       if (isNaN(ms) || ms <= 0) {
         throw new InvalidArgsError(`Invalid timeout value for ${stage}: ${value}`);
       }
       if (["dns", "tcp", "tls", "ttfb", "body"].includes(stage)) {
-        timeouts[stage as keyof ProbeOptions["timeouts"]] = ms;
+        timeouts[stage as keyof typeof timeouts] = ms;
       } else {
         throw new InvalidArgsError(`Unknown timeout stage: ${stage}`);
       }
@@ -230,10 +235,6 @@ function printJson(results: AggregatedResults): void {
   console.log(JSON.stringify(results, null, 2));
 }
 
-/**
- * Print enhanced explain output showing parsed options, resolved config,
- * estimated time, and stages that will run.
- */
 async function printExplainOutput(options: CliOptions): Promise<void> {
   const runs = options.runs ?? 5;
   const concurrency = options.concurrency ?? 1;
@@ -279,7 +280,7 @@ async function printExplainOutput(options: CliOptions): Promise<void> {
   }
 
   // Parse timeouts for estimation
-  const timeouts = options.timeout ? parseTimeouts(options.timeout) : {};
+  const timeouts: { dns?: number; tcp?: number; tls?: number; ttfb?: number; body?: number } = options.timeout ? parseTimeouts(options.timeout) : {};
 
   // Calculate estimated time
   const estimatedTimeMs = calculateEstimatedTime(runs, concurrency, delayMs, timeouts);
@@ -314,7 +315,7 @@ async function printExplainOutput(options: CliOptions): Promise<void> {
   console.log("");
   console.log("Stages to Run:");
   for (const stage of stages) {
-    const timeout = timeouts[stage] ?? "default";
+    const timeout = timeouts[stage as keyof typeof timeouts] ?? "default";
     console.log(`  ${stage.toUpperCase()}: ${timeout === "default" ? "default timeout" : `${timeout}ms timeout`}`);
   }
   console.log("");
@@ -330,7 +331,7 @@ function calculateEstimatedTime(
   runs: number,
   concurrency: number,
   delayMs: number,
-  timeouts: ProbeOptions["timeouts"]
+  timeouts: { dns?: number; tcp?: number; tls?: number; ttfb?: number; body?: number }
 ): number {
   // Estimate per-run time based on timeouts or defaults
   const perRunEstimate =
@@ -399,6 +400,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       console.error("TUI mode enabled, importing tui module...");
       const { runTUI } = await import("./tui");
       console.error("runTUI imported, calling...");
+      const timeouts = options.timeout ? parseTimeouts(options.timeout) : undefined;
       await runTUI({
         url: options.url,
         runs: options.runs ?? 5,
@@ -406,7 +408,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         delayMs: options.delayMs ?? 0,
         maxBody: options.maxBody ?? 10 * 1024 * 1024,
         rejectUnauthorized: options.insecure ? false : true,
-        timeouts: options.timeout ? parseTimeouts(options.timeout) : undefined,
+        timeouts,
         allowPrivate: options.allowPrivate,
         maxRedirects: options.maxRedirects ?? 5,
       });

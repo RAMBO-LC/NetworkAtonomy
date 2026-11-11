@@ -10,8 +10,9 @@
 | `--timeout <stage> <ms>` | see below | integer | Per-stage override for DNS, TCP, TLS, ttfb, body. | PROPOSED |
 | `--delay <ms>` | 0 | integer ≥ 0 | Delay between runs; politeness. | PROPOSED |
 | `--max-redirects` | 5 | integer ≥ 0 | Cap on redirect hops followed. | PROPOSED |
-| `--max-body <bytes>` | 1048576 | integer ≥ 0 | Stop reading after this many body bytes. | PROPOSED |
-| `--no-verify` | off | boolean | Skip TLS certificate verification. | PROPOSED |
+|| `--max-body <bytes>` | 1048576 | integer ≥ 0 | Stop reading after this many body bytes. | PROPOSED ||
+|| `--no-verify` | off | boolean | Skip TLS certificate verification. | PROPOSED ||
+|| `--tui` | off | boolean | Launch interactive terminal dashboard (requires Node >= 22.6). | PROPOSED ||
 
 ## Per-Stage Timeouts
 

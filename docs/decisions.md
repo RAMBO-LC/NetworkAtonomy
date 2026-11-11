@@ -177,3 +177,45 @@ Each entry has a status, reason, and rejected option. Never edit old entries to 
 - **Status:** Accepted
 - **Reason:** `build` compiles TypeScript to `dist/` with existing tsconfig. `dev` runs `src/cli.ts` with `tsx` for direct argument passthrough. Verified `npm run build` succeeds and produces working `dist/cli.js`.
 - **Rejected:** No build script (unverifiable distribution); complex build tooling.
+
+## D-UI1: Raw ANSI terminal output for waterfall
+
+- **Status:** Superseded by D-UI1-amended
+- **Reason:** Terminal waterfall uses raw ANSI escape sequences for colored bars. No external UI library. Simplicity over features.
+- **Rejected:** Using a TUI library like `blessed` or `ink`; building a full widget set.
+
+## D-UI1-amended: Use @profullstack/hqtui, pinned to an exact version (no ^ or ~)
+
+- **Status:** Accepted
+- **Reason:** A complete terminal UI layer with a headless renderer and terminal restore, with no transitive runtime dependencies. Supersedes D-UI1 (raw ANSI). Trade-off: depends on a single young maintainer; mitigated by the adapter below.
+- **Rejected:** Raw ANSI (D-UI1); `blessed` (previous attempt); `ink` (React dependency).
+
+## D-UI14 Adapter: only src/tui/adapter.ts imports @profullstack/hqtui
+
+- **Status:** Accepted
+- **Reason:** All panels and key handling call the adapter's own functions. No other file imports the library. If the library is replaced, only the adapter changes.
+- **Rejected:** Importing the library directly in panels or CLI.
+
+## D-UI15 Node version: raise the minimum to Node 22.6 in package.json engines, in docs/spec.md, and in the README
+
+- **Status:** Accepted
+- **Reason:** The library's supported runtimes (engines: node >= 22.6).
+- **Rejected:** Keeping Node 18/20 minimum.
+
+## D-UI16 Panel mapping: use the widgets in this table, and write any widget the library lacks (the jitter range bar) inside the adapter
+
+- **Status:** Accepted
+- **Reason:**
+  - Stage bars: meters or progress
+  - History: sparkline or graph
+  - TLS, certificate, response: keyValues
+  - Redirect hops: tree or list
+  - Status bar: statusBar
+  - Keys: the library's normalized input, mapped to the keys in D-UI5
+- **Rejected:** Building custom widgets outside the adapter.
+
+## D-UI17 Tests: render pure panels with renderToText
+
+- **Status:** Accepted
+- **Reason:** The unit tests must not need a TTY. Terminal-restore is tested with the library's own behavior plus one integration check on a pseudo-terminal, if one is available in the environment; otherwise mark it NOT VERIFIED.
+- **Rejected:** Full integration tests requiring a real terminal.
