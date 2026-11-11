@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "README.md",
+                "file": "CHANGELOG.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "README"
+              "title": "CHANGELOG"
             }
           }
         ]
@@ -99,7 +99,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "README.md",
+                "file": "CHANGELOG.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -118,7 +118,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "README.md",
+                "file": "CHANGELOG.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
@@ -161,7 +161,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "README.md",
+                "file": "CHANGELOG.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
@@ -190,11 +190,41 @@
   },
   "active": "f0c85cb3dd3cd316",
   "lastOpenFiles": [
-    "docs/plan.md",
-    "docs/spec.md",
-    "docs/overview.md",
     "README.md",
-    "CHANGELOG.md",
-    "AGENT.md"
+    "src/__tests__/curl-comparison.ts",
+    "src/__tests__/bug-ttfb-investigation.test.ts",
+    "src/__tests__/integration.test.ts",
+    "src/__tests__/errors.test.ts",
+    "src/errors.ts",
+    "src/__tests__/json.test.ts",
+    "src/json.ts",
+    "schema/output.json",
+    "schema",
+    "src/__tests__/cli.test.ts",
+    "node_modules/fsevents/README.md",
+    "node_modules/vitest/README.md",
+    "node_modules/vitest/LICENSE.md",
+    "node_modules/@vitest/spy/README.md",
+    "node_modules/typescript/SECURITY.md",
+    "node_modules/typescript/README.md",
+    "node_modules/vite/README.md",
+    "node_modules/vite/LICENSE.md",
+    "node_modules/postcss/README.md",
+    "node_modules/@jridgewell/trace-mapping/README.md",
+    "node_modules/@vitest/mocker/README.md",
+    "node_modules/@jridgewell/sourcemap-codec/README.md",
+    "node_modules/source-map-js/README.md",
+    "node_modules/nanoid/README.md",
+    "node_modules/lightningcss/README.md",
+    "node_modules/es-module-lexer/README.md",
+    "node_modules/picomatch/README.md",
+    "node_modules/expect-type/SECURITY.md",
+    "node_modules/chai/README.md",
+    "node_modules/expect-type/README.md",
+    "node_modules/detect-libc/README.md",
+    "node_modules/estree-walker/README.md",
+    "node_modules/@jridgewell/resolve-uri/README.md",
+    "node_modules/tinybench/README.md",
+    "node_modules/fdir/README.md"
   ]
 }

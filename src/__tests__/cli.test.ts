@@ -254,7 +254,7 @@ describe("cli - runProbes integration", () => {
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(ExitCode.ALL_RUNS_FAILED);
+    expect(code).toBe(ExitCode.OK); // Per spec: if at least 1 run succeeds, exit 0 with warning
   });
 
   it("prints JSON when --json flag is set", async () => {
@@ -345,79 +345,79 @@ describe("cli - exit code mapping", () => {
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(ExitCode.DNS_FAILED);
+    expect(code).toBe(ExitCode.NETWORK_FAILURE);
   });
 
-  it("returns DNS_FAILED for SSRF blocked addresses", async () => {
+  it("returns NETWORK_FAILURE for SSRF blocked addresses", async () => {
     mockRunProbesFn.mockRejectedValue(new Error("SSRF guard blocked example.com: 127.0.0.1"));
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(ExitCode.DNS_FAILED);
+    expect(code).toBe(ExitCode.BLOCKED_ADDRESS);
   });
 
-  it("returns TCP_FAILED for connection refused", async () => {
+  it("returns NETWORK_FAILURE for connection refused", async () => {
     mockRunProbesFn.mockRejectedValue(new Error("Connection refused"));
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(ExitCode.TCP_FAILED);
+    expect(code).toBe(ExitCode.NETWORK_FAILURE);
   });
 
-  it("returns TCP_FAILED for connection timeout", async () => {
+  it("returns TIMEOUT for connection timeout", async () => {
     mockRunProbesFn.mockRejectedValue(new Error("ETIMEDOUT"));
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(ExitCode.TCP_FAILED);
+    expect(code).toBe(ExitCode.TIMEOUT);
   });
 
-  it("returns TLS_FAILED for TLS handshake errors", async () => {
+  it("returns NETWORK_FAILURE for TLS handshake errors", async () => {
     mockRunProbesFn.mockRejectedValue(new Error("TLS handshake failed: certificate verify failed"));
 
     const code = await main(["https://example.com"]);
 
-    expect(code).toBe(ExitCode.TLS_FAILED);
+    expect(code).toBe(ExitCode.NETWORK_FAILURE);
   });
 
-  it("returns TLS_FAILED for SSL errors", async () => {
+  it("returns NETWORK_FAILURE for SSL errors", async () => {
     mockRunProbesFn.mockRejectedValue(new Error("SSL error: self signed certificate"));
 
     const code = await main(["https://example.com"]);
 
-    expect(code).toBe(ExitCode.TLS_FAILED);
+    expect(code).toBe(ExitCode.NETWORK_FAILURE);
   });
 
-  it("returns HTTP_FAILED for HTTP response errors", async () => {
+  it("returns NETWORK_FAILURE for HTTP response errors", async () => {
     mockRunProbesFn.mockRejectedValue(new Error("HTTP response error: 500 Internal Server Error"));
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(ExitCode.HTTP_FAILED);
+    expect(code).toBe(ExitCode.NETWORK_FAILURE);
   });
 
-  it("returns HTTP_FAILED for TTFB errors", async () => {
+  it("returns NETWORK_FAILURE for TTFB errors", async () => {
     mockRunProbesFn.mockRejectedValue(new Error("TTFB timeout"));
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(ExitCode.HTTP_FAILED);
+    expect(code).toBe(ExitCode.NETWORK_FAILURE);
   });
 
-  it("returns HTTP_FAILED for body download errors", async () => {
+  it("returns NETWORK_FAILURE for body download errors", async () => {
     mockRunProbesFn.mockRejectedValue(new Error("Body download failed: socket closed"));
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(ExitCode.HTTP_FAILED);
+    expect(code).toBe(ExitCode.NETWORK_FAILURE);
   });
 
-  it("returns ALL_RUNS_FAILED when all runs fail", async () => {
+  it("returns NETWORK_FAILURE when all runs fail", async () => {
     mockRunProbesFn.mockRejectedValue(new Error("All runs failed with unknown error"));
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(ExitCode.ALL_RUNS_FAILED);
+    expect(code).toBe(ExitCode.NETWORK_FAILURE);
   });
 
   it("returns INVALID_ARGS for validation errors", async () => {
