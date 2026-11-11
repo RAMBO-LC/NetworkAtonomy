@@ -4,42 +4,152 @@ Each entry has a status, reason, and rejected option. Never edit old entries to 
 
 ## D-001: Connect to the checked IP address (SSRF protection)
 
-- **Status:** Proposed (pending spec approval)
+- **Status:** Accepted
 - **Reason:** Connecting by hostname again after DNS resolution allows DNS rebinding attacks. The IP is validated first, then used for the actual connection.
 - **Rejected:** Check the hostname, then connect by hostname.
 
 ## D-002: Use Node.js built-in `dns`, `net`, `tls`, and `https` modules for timing
 
-- **Status:** Proposed (pending spec approval)
+- **Status:** Accepted
 - **Reason:** No extra dependencies, and exact control over stage boundaries.
 - **Rejected:** Third-party timing libraries.
 
 ## D-003: v1 does not follow HTTP redirects (3xx)
 
-- **Status:** Proposed (pending spec approval)
+- **Status:** Superseded by D-R1. See D-R1.
 - **Reason:** Timing cross-origin or multi-hop redirects introduces ambiguity into individual stage boundaries. v1 probes the exact target URL only.
 - **Rejected:** Auto-follow redirects and time each hop.
 
 ## D-004: Address selection prefers IPv4 when both A and AAAA records exist
 
-- **Status:** Proposed (pending spec approval)
+- **Status:** Accepted
 - **Reason:** Consistent timing benchmarks across runs; IPv4 is more widely deployed and avoids Happy Eyeballs variability.
 - **Rejected:** Use Node's default Happy Eyeballs algorithm; prefer IPv6.
 
 ## D-005: TLS session resumption disabled per run (`sessionTimeout: 0`, fresh socket)
 
-- **Status:** Proposed (pending spec approval)
+- **Status:** Accepted
 - **Reason:** Ensures each run measures a full handshake; prevents resumed sessions from skewing TLS timing.
 - **Rejected:** Allow default TLS session caching.
 
 ## D-006: Blocked IP ranges — exactly as listed in `docs/parameters.md`
 
-- **Status:** Proposed (pending spec approval)
+- **Status:** Accepted
 - **Reason:** Comprehensive coverage of private, loopback, link-local, unspecified, multicast, and reserved ranges for both IPv4 and IPv6.
 - **Rejected:** Smaller subset of ranges; dynamic blocklist.
 
 ## D-007: Median of successful runs only; warning if any runs fail; exit non-zero if all fail
 
-- **Status:** Proposed (pending spec approval)
+- **Status:** Accepted
 - **Reason:** Robust against transient network errors while still surfacing persistent failures.
 - **Rejected:** Fail the whole probe if any single run fails; or silently drop failed runs without warning.
+
+## D-008: TTFB measured from request write completion to first response byte
+
+- **Status:** Accepted
+- **Reason:** The TTFB timer must start after the HTTP request is fully written to the socket (write callback fires), not when write is initiated. Previously started at write initiation, causing ~3x inflation.
+- **Fix:** Added `ttfbStartMs` set in `socket.write()` callback; TTFB = `performance.now() - ttfbStartMs` on first `data` event.
+- **Verified:** Local fixture with 300ms delay now shows tool TTFB ≈ 302ms (curl: 306ms).
+
+## D-009: Total time = median of per-run totals (not sum of stage medians)
+
+- **Status:** Accepted
+- **Reason:** Per-run total = sum of all stage timings for that run. Total median = median of per-run totals across successful runs. This represents actual end-to-end latency distribution. Sum of stage medians is a synthetic value no single run experienced.
+- **CLI Output:** Header reads "Total (median of per-run totals)"
+
+## D-010: HTTP status code included in JSON output
+
+- **Status:** Accepted
+- **Reason:** Spec requires recording the response status code. Added `statusCode` to `AggregatedResults` from first successful run.
+- **Redirect Behavior:** For 3xx responses, the 3xx status code is reported (redirects not followed).
+
+## D-011: Tool does NOT follow HTTP redirects
+
+- **Status:** Superseded by D-R1. See D-R1.
+- **Reason:** Spec section "Redirects" states: "The tool MUST NOT follow redirects. The 3xx status code is recorded." Tool measures timing for the initial response only (TTFB and body download for the 3xx response). Location header is parsed but not followed.
+- **google.com behavior:** Returns 301 → www.google.com. Tool reports statusCode=301, TTFB≈283ms (for 301 response), body≈0.4ms. Curl follows redirect by default and reports TTFB for final 200 response (~400ms).
+- **www.google.com behavior:** Returns 200 OK. Tool reports statusCode=200, TTFB≈317ms, body≈71ms. Matches curl when curl doesn't follow redirects.
+
+## D-R1: Follow redirects, maximum 5 hops
+
+- **Status:** Accepted
+- **Reason:** The owner approved following redirects with a hop cap. The value 5 is recorded in [[docs/parameters.md]] as `--max-redirects`.
+- **Rejected:** Not following redirects (previous behavior).
+
+## D-R2: Per-hop SSRF check, connect to checked IP, keep hostname for SNI and Host
+
+- **Status:** Accepted
+- **Reason:** On every hop, check the scheme (http or https only), resolve the host, reject blocked addresses, and connect to the checked IP. Keep the hostname for SNI and Host. A redirect to a blocked address is an error with exit code 2.
+- **Rejected:** Checking only the first hop; connecting by hostname.
+
+## D-R3: Redirect loop and hop-limit errors
+
+- **Status:** Accepted
+- **Reason:** A repeated URL is a loop error (exit code 7). Exceeding the maximum hops is an error (exit code 8).
+- **Rejected:** Silently stopping; reusing one exit code for both.
+
+## D-R4: Resolve relative Location headers against the current URL
+
+- **Status:** Accepted
+- **Reason:** Relative `Location` values must resolve against the URL that produced them.
+- **Rejected:** Treating relative locations as absolute; rejecting them.
+
+## D-R5: Timed method is GET
+
+- **Status:** Accepted
+- **Reason:** Redirect hops are timed with GET.
+- **Rejected:** Preserving the original method across hops.
+
+## D-R6: Per-hop timing, result reports per-hop and final page timings
+
+- **Status:** Accepted
+- **Reason:** Each hop is timed separately (DNS, TCP, TLS, TTFB, body). The result reports per-hop timings and the final page's timings.
+- **Rejected:** Timing only the first hop; reporting only the final hop.
+
+## D-T1: Total is the median of per-run totals
+
+- **Status:** Accepted
+- **Reason:** Total is the median, across runs, of each run's total from the first DNS lookup to the last body byte of the final response. Labeled that way in the output and in [[docs/spec.md]].
+- **Rejected:** Sum of stage medians.
+
+## D-W1: Terminal waterfall
+
+- **Status:** Accepted
+- **Reason:** Bars use the same values as the table. Scale to the largest stage with a maximum width of 40 characters. Show each stage's percentage of Total. On terminals narrower than 60 columns, print only the table.
+- **Rejected:** A separate bar scale; always printing the waterfall.
+
+## D-E1: Explain rules and thresholds in docs/parameters.md
+
+- **Status:** Accepted
+- **Reason:** Rules and thresholds live in [[docs/parameters.md]], each marked PROPOSED. Each message states what the data can and cannot show. Never name a single bottleneck with certainty.
+- **Rejected:** Hard-coded thresholds in code; naming a single bottleneck.
+
+## D-E2: TLS facts from the Node.js TLS socket
+
+- **Status:** Accepted
+- **Reason:** TLS facts come from the Node.js TLS socket. Verified methods `getProtocol()` and `isSessionReused()` in the official Node.js tls documentation for the target version (v26.10.0). Record the URL and date in [[docs/knowledge.md]]. If a method is missing, mark the feature NOT VERIFIED and stop that part. Report the TLS protocol version and whether the session was resumed. Do not state round-trip counts.
+- **Rejected:** Guessing protocol support; stating round-trip counts.
+
+## D-E3: Explain output must not claim anything the socket does not expose
+
+- **Status:** Accepted
+- **Reason:** The explain output must not claim anything the socket does not expose.
+- **Rejected:** Inferring facts beyond the socket's reports.
+
+## D-S1: Export probe(url, options) from the package entry point
+
+- **Status:** Accepted
+- **Reason:** Returns a typed result object with the same numbers as the CLI JSON output. No side effects (no printing, no alerts, no process exit). Options: runs, timeouts, and the injected resolver for tests.
+- **Rejected:** A separate SDK surface with different numbers.
+
+## D-S2: Publish types, document result shape, mark package 0.x
+
+- **Status:** Accepted
+- **Reason:** Publish the types (exports map and `.d.ts`). Document the result shape in [[docs/spec.md]]. Mark the package 0.x in package.json and state in the README that the API may change before 1.0.
+- **Rejected:** Shipping untyped API; claiming 1.0 stability.
+
+## D-S3: SDK enforces the same SSRF guard, no option to disable
+
+- **Status:** Accepted
+- **Reason:** The SDK must enforce the same SSRF guard. There is no option to disable it.
+- **Rejected:** An `allowPrivate` option on the SDK; any bypass flag.

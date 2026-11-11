@@ -38,6 +38,7 @@ function createAggregatedResults(overrides: Partial<AggregatedResults> = {}): Ag
     url: "https://example.com",
     ip: "93.184.216.34",
     family: "IPv4",
+    statusCode: 200,
     warnings: [],
     ...overrides,
   };
@@ -304,6 +305,7 @@ describe("json - schema validation", () => {
     expect(parsed).toHaveProperty("url");
     expect(parsed).toHaveProperty("ip");
     expect(parsed).toHaveProperty("family");
+    expect(parsed).toHaveProperty("statusCode");
     expect(parsed).toHaveProperty("warnings");
 
     // Verify stages structure

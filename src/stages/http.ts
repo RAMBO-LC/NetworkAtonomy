@@ -27,6 +27,8 @@ export interface HttpTimingResult {
   statusCode: number;
   /** Total response body bytes received (capped at maxBody). */
   bytesReceived: number;
+  /** Location header value if present (for redirects). */
+  location?: string;
 }
 
 /** Options for the HTTP timing measurement. */
@@ -86,11 +88,13 @@ export async function measureHttp(options: HttpTimingOptions): Promise<HttpTimin
     const requestBuffer = buildRequest(hostname, path, port, protocol);
 
     let ttfbMs: number | null = null;
-    let bodyStartMs: number | null = null;
+      let ttfbStartMs: number | null = null;
+      let bodyStartMs: number | null = null;
     let bytesReceived = 0;
     let statusCode = 0;
     let headersComplete = false;
     let headerBuffer = Buffer.alloc(0);
+    let location: string | undefined;
 
     const cleanup = () => {
       socket.removeListener("data", onData);
@@ -129,6 +133,7 @@ export async function measureHttp(options: HttpTimingOptions): Promise<HttpTimin
         bodyMs,
         statusCode,
         bytesReceived,
+        location,
       });
     };
 
@@ -137,7 +142,8 @@ export async function measureHttp(options: HttpTimingOptions): Promise<HttpTimin
 
       if (ttfbMs === null) {
         // First data received - this is TTFB
-        ttfbMs = now;
+        // ttfbStartMs is set in the write callback when request is fully written
+        ttfbMs = now - ttfbStartMs!;
         bodyStartMs = now;
       }
 
@@ -160,6 +166,12 @@ export async function measureHttp(options: HttpTimingOptions): Promise<HttpTimin
             statusCode = 0;
           }
 
+          // Extract Location header
+          const locationMatch = headerText.match(/^Location:\s*(.+)$/im);
+          if (locationMatch) {
+            location = locationMatch[1].trim();
+          }
+
           // Body starts after headers
           const bodyStart = headerEnd + 4;
           if (bodyStart < chunk.length) {
@@ -176,6 +188,7 @@ export async function measureHttp(options: HttpTimingOptions): Promise<HttpTimin
                 bodyMs,
                 statusCode,
                 bytesReceived: maxBody,
+                location,
               });
               return;
             }
@@ -195,26 +208,27 @@ export async function measureHttp(options: HttpTimingOptions): Promise<HttpTimin
         socket.destroy();
         const bodyMs = performance.now() - bodyStartMs!;
         resolve({
-          ttfbMs: ttfbMs!,
-          bodyMs,
-          statusCode,
-          bytesReceived: maxBody,
-        });
+                        ttfbMs: ttfbMs!,
+                        bodyMs,
+                        statusCode,
+                        bytesReceived: maxBody,
+                        location,
+                      });
       }
     };
 
     // Write request and start timing
-    const writeStart = performance.now();
-    socket.write(requestBuffer, (err) => {
-      if (err) {
-        cleanup();
-        socket.destroy();
-        reject(err);
-        return;
-      }
-      // TTFB timing starts after request is fully written
-      // We'll measure from here in the first 'data' event
-    });
+      const writeStart = performance.now();
+      socket.write(requestBuffer, (err) => {
+        if (err) {
+          cleanup();
+          socket.destroy();
+          reject(err);
+          return;
+        }
+        // TTFB timing starts after request is fully written
+        ttfbStartMs = performance.now();
+      });
 
     socket.once("error", onError);
     socket.once("end", onEnd);

@@ -15,7 +15,10 @@ import {
   TcpFailedError,
   TlsFailedError,
   HttpFailedError,
+  TimeoutError,
   AllRunsFailedError,
+  RedirectLoopError,
+  TooManyRedirectsError,
   InternalError,
   getExitCode,
 } from "./errors";
@@ -32,6 +35,8 @@ interface CliOptions {
   explain?: boolean;
   help?: boolean;
   version?: boolean;
+  allowPrivate?: boolean;
+  maxRedirects?: number;
 }
 
 /**
@@ -99,6 +104,15 @@ function parseArgs(args: string[]): CliOptions {
           break;
         case "version":
           options.version = true;
+          break;
+        case "allow-private":
+          options.allowPrivate = true;
+          break;
+        case "max-redirects":
+          options.maxRedirects = parseInt(value ?? args[++i] ?? "", 10);
+          if (isNaN(options.maxRedirects) || options.maxRedirects < 0) {
+            throw new InvalidArgsError("--max-redirects must be a non-negative integer");
+          }
           break;
         default:
           throw new InvalidArgsError(`Unknown option: --${flag}`);
@@ -193,6 +207,8 @@ Options:
   --delay <ms>         Delay between runs in milliseconds (default: 0)
   --max-body <bytes>   Maximum response body bytes to read (default: 10485760)
   --insecure           Skip TLS certificate verification
+  --allow-private      Allow private/loopback addresses (bypass SSRF guard)
+  --max-redirects <n>  Maximum redirect hops to follow (default: 5)
   --timeout <ms>       Timeout for all stages in milliseconds
   --timeout <spec>     Per-stage timeouts (e.g., "dns=1000,tcp=2000,ttfb=5000")
   --json               Output results as JSON
@@ -204,6 +220,7 @@ Examples:
   npx networkatonomy https://example.com --runs 10 --concurrency 2
   npx networkatonomy https://example.com --timeout 5000 --json
   npx networkatonomy https://example.com --timeout "dns=1000,tcp=2000,tls=3000,ttfb=5000,body=10000"
+  npx networkatonomy http://127.0.0.1:8080 --allow-private
 `.trim();
 }
 
@@ -224,6 +241,7 @@ async function printExplainOutput(options: CliOptions): Promise<void> {
   const delayMs = options.delayMs ?? 0;
   const maxBody = options.maxBody ?? 10 * 1024 * 1024;
   const insecure = options.insecure ?? false;
+  const allowPrivate = options.allowPrivate ?? false;
   const timeoutStr = options.timeout ?? "none";
   const outputFormat = options.json ? "JSON" : "human-readable table";
 
@@ -248,7 +266,7 @@ async function printExplainOutput(options: CliOptions): Promise<void> {
   let resolutionError: string | null = null;
 
   try {
-    const resolved = await resolveHostname(validation.hostname, defaultDnsResolver);
+    const resolved = await resolveHostname(validation.hostname, defaultDnsResolver, allowPrivate);
     resolvedIp = resolved.address;
     resolvedFamily = resolved.family === "ipv4" ? "IPv4" : "IPv6";
   } catch (error) {
@@ -279,6 +297,7 @@ async function printExplainOutput(options: CliOptions): Promise<void> {
   console.log(`  Delay: ${delayMs}ms`);
   console.log(`  Max body: ${maxBody} bytes`);
   console.log(`  Insecure (skip TLS verify): ${insecure}`);
+  console.log(`  Allow private addresses: ${allowPrivate}`);
   console.log(`  Timeout: ${timeoutStr}`);
   console.log(`  Output format: ${outputFormat}`);
   console.log("");
@@ -384,6 +403,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       maxBody: options.maxBody,
       rejectUnauthorized: options.insecure ? false : true,
       timeouts: options.timeout ? parseTimeouts(options.timeout) : undefined,
+      allowPrivate: options.allowPrivate,
+      maxRedirects: options.maxRedirects ?? 5,
     };
 
     const results = await runProbes(options.url, probeOptions);
@@ -395,7 +416,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
 
     // Exit with non-zero if any runs failed
-    return results.runsFailed > 0 ? ExitCode.ALL_RUNS_FAILED : ExitCode.OK;
+    return results.runsFailed > 0 ? ExitCode.NETWORK_FAILURE : ExitCode.OK;
   } catch (error) {
     const exitCode = mapErrorToExitCode(error);
     const message = error instanceof Error ? error.message : String(error);
@@ -417,53 +438,60 @@ function mapErrorToExitCode(error: unknown): ExitCode {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
 
-    // DNS resolution errors
-    if (error instanceof ResolutionError || message.includes("dns resolution failed") || message.includes("no addresses found")) {
-      return ExitCode.DNS_FAILED;
+    // Redirect loop (exit code 7)
+    if (message.includes("redirect loop")) {
+      return ExitCode.REDIRECT_LOOP;
     }
 
-    // SSRF/blocked address errors
-    if (error instanceof BlockedAddressError || message.includes("ssrf guard blocked")) {
-      return ExitCode.DNS_FAILED;
+    // Too many redirects (exit code 8)
+    if (message.includes("too many redirects")) {
+      return ExitCode.TOO_MANY_REDIRECTS;
     }
 
-    // TCP connection errors
+    // SSRF/blocked address errors (exit code 2)
+    if (error instanceof BlockedAddressError || message.includes("ssrf guard blocked") || message.includes("blocked address")) {
+      return ExitCode.BLOCKED_ADDRESS;
+    }
+
+    // Invalid args (validation errors) - check FIRST to catch "Invalid URL" messages before other matching
+    if (message.includes("invalid") || message.includes("missing required") || message.includes("unknown option") || message.includes("short flags") || message.includes("must be a positive") || message.includes("must be a non-negative")) {
+      return ExitCode.INVALID_ARGS;
+    }
+
+    // HTTP errors (exit code 3 - NETWORK_FAILURE) - check BEFORE timeout since TTFB errors contain "timeout"
+    if (message.includes("http") || message.includes("ttfb") || message.includes("body download") || message.includes("response") || message.includes("status code") || message.includes("headers")) {
+      return ExitCode.NETWORK_FAILURE;
+    }
+
+    // Timeout errors (exit code 4)
+    if (message.includes("timeout") || message.includes("timed out") || message.includes("etimedout")) {
+      return ExitCode.TIMEOUT;
+    }
+
+    // DNS resolution errors (exit code 3 - NETWORK_FAILURE)
+    if (error instanceof ResolutionError || message.includes("dns resolution failed") || message.includes("no addresses found") || message.includes("nxdomain")) {
+      return ExitCode.NETWORK_FAILURE;
+    }
+
+    // TCP connection errors (exit code 3 - NETWORK_FAILURE)
     if (message.includes("connection refused") ||
         message.includes("econnrefused") ||
-        message.includes("etimedout") ||
-        message.includes("timeout") ||
+        message.includes("host unreachable") ||
+        message.includes("ehostunreach") ||
         message.includes("connect") ||
         message.includes("tcp") ||
         message.includes("socket")) {
-      // Check if it's specifically a TLS error first
-      if (message.includes("tls") || message.includes("ssl") || message.includes("certificate") || message.includes("handshake")) {
-        return ExitCode.TLS_FAILED;
-      }
-      // Check if it's an HTTP error
-      if (message.includes("http") || message.includes("ttfb") || message.includes("body") || message.includes("response") || message.includes("status")) {
-        return ExitCode.HTTP_FAILED;
-      }
-      return ExitCode.TCP_FAILED;
+      return ExitCode.NETWORK_FAILURE;
     }
 
-    // TLS errors
-    if (message.includes("tls") || message.includes("ssl") || message.includes("certificate") || message.includes("handshake") || message.includes("secureconnect")) {
-      return ExitCode.TLS_FAILED;
+    // TLS errors (exit code 3 - NETWORK_FAILURE)
+    if (message.includes("tls") || message.includes("ssl") || message.includes("certificate") || message.includes("handshake") || message.includes("secureconnect") || message.includes("verification")) {
+      return ExitCode.NETWORK_FAILURE;
     }
 
-    // HTTP errors
-    if (message.includes("http") || message.includes("ttfb") || message.includes("body download") || message.includes("response") || message.includes("status code") || message.includes("headers")) {
-      return ExitCode.HTTP_FAILED;
-    }
-
-    // All runs failed
+    // All runs failed (exit code 3 - NETWORK_FAILURE per spec)
     if (message.includes("all runs failed")) {
-      return ExitCode.ALL_RUNS_FAILED;
-    }
-
-    // Invalid args (validation errors)
-    if (message.includes("invalid") || message.includes("missing required") || message.includes("too many") || message.includes("unknown option") || message.includes("short flags") || message.includes("must be a positive") || message.includes("must be a non-negative")) {
-      return ExitCode.INVALID_ARGS;
+      return ExitCode.NETWORK_FAILURE;
     }
   }
 

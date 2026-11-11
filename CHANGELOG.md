@@ -1,7 +1,3 @@
-# Changelog
-
-## [Unreleased]
-
 ### Added
 
 - Agent rules ([[AGENT.md]], [[.agent/workflows/report-review.md]]).
@@ -23,3 +19,5 @@
 - Task 12: --explain output ([[src/cli.ts]]) — Enhanced dry-run mode showing parsed options, resolved IP via DNS, stages to run (DNS/TCP/TLS/TTFB/Body), per-stage timeouts, and estimated total time; verified by `npm test -- src/__tests__/cli.test.ts` (32 tests).
 - Task 13: Exit codes & errors ([[src/errors.ts]], [[src/__tests__/errors.test.ts]], [[src/cli.ts]]) — ExitCode enum (0/1/2/3/4/5/6/255), typed error hierarchy, stderr/stdout separation, --version flag; verified by `npm test -- src/__tests__/cli.test.ts src/__tests__/errors.test.ts` (69 tests).
 - Task 14: Integration test ([[src/__tests__/integration.test.ts]], [[src/fixtures/localhost-cert.pem]]) — 25 end-to-end tests against local HTTP/HTTPS servers, testing flag combinations, JSON/human output, timing validation, schema compliance, error handling; verified by `npm test -- src/__tests__/integration.test.ts` (25 tests).
+- Task 15: README update ([[README.md]]) — Comprehensive CLI documentation with all flags, examples, exit codes, JSON schema, SSRF behavior, timeouts, and architecture; verified by `cat README.md`.
+- Bug Investigation: TTFB timing fix ([[src/stages/http.ts]], [[src/__tests__/bug-ttfb-investigation.test.ts]], [[docs/decisions.md]], [[docs/knowledge.md]]) — Fixed TTFB measurement to start after request write completion (socket.write callback) instead of write initiation. Verified with local fixture server (300ms delay) and curl comparison: tool TTFB 302ms vs curl 306ms. Added statusCode to JSON output, documented Total = median of per-run totals, verified redirect handling (301 reported, not followed). Verified by `npm test -- src/__tests__/bug-ttfb-investigation.test.ts` (4 tests) and full suite (266 tests).

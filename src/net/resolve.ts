@@ -6,6 +6,7 @@
  * If ANY resolved IP is blocked, throws an error.
  */
 
+import { isIP } from "node:net";
 import { classifyAddress, isAddressBlocked, type AddressFamily } from "./address";
 
 /**
@@ -141,14 +142,29 @@ function getNormalizedAddressAndFamily(address: string): { address: string; fami
  * @param hostname - The hostname to resolve.
  * @param resolver - Optional DNS resolver. Defaults to Node.js `dns/promises`.
  *                   Injected for testing (e.g., fake resolver returning blocked IPs).
+ * @param allowPrivate - If true, bypass SSRF guard and allow private/loopback addresses. Default: false.
  * @returns The first allowed IP address and its family (prefers IPv4).
  * @throws {ResolutionError} If no addresses are resolved.
- * @throws {BlockedAddressError} If ANY resolved address is in a blocked range.
+ * @throws {BlockedAddressError} If ANY resolved address is in a blocked range (unless allowPrivate is true).
  */
 export async function resolveHostname(
   hostname: string,
   resolver: DnsResolver = defaultDnsResolver,
+  allowPrivate: boolean = false,
 ): Promise<ResolvedHost> {
+  // If hostname is already an IP, bypass DNS resolution
+  const ipFamily = isIP(hostname);
+  if (ipFamily !== 0) {
+    const address = hostname;
+    const family = ipFamily === 4 ? "ipv4" : "ipv6";
+
+    if (!allowPrivate && isAddressBlocked(address)) {
+      throw new BlockedAddressError(hostname, [address]);
+    }
+
+    return { address, family: family as AddressFamily };
+  }
+
   const { ipv4, ipv6 } = await resolver(hostname);
 
   const allAddresses = [...ipv4, ...ipv6];
@@ -159,16 +175,19 @@ export async function resolveHostname(
 
   // Check ALL addresses against the guard first.
   // If ANY is blocked, abort immediately (SSRF protection).
-  const blockedAddresses: string[] = [];
-  for (const address of allAddresses) {
-    const { blocked } = checkAddressBlocked(address);
-    if (blocked) {
-      blockedAddresses.push(address);
+  // Skip this check if allowPrivate is true (for local testing).
+  if (!allowPrivate) {
+    const blockedAddresses: string[] = [];
+    for (const address of allAddresses) {
+      const { blocked } = checkAddressBlocked(address);
+      if (blocked) {
+        blockedAddresses.push(address);
+      }
     }
-  }
 
-  if (blockedAddresses.length > 0) {
-    throw new BlockedAddressError(hostname, blockedAddresses);
+    if (blockedAddresses.length > 0) {
+      throw new BlockedAddressError(hostname, blockedAddresses);
+    }
   }
 
   // All addresses are allowed. Pick the first one, preferring IPv4.
