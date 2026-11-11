@@ -172,7 +172,7 @@ describe("bug investigation - TTFB timing", () => {
     expect(results.stages.body.medianMs).toBeLessThan(10);
   });
 
-  it("should NOT follow redirects (301) and should report the 3xx status", async () => {
+  it("should follow redirects (301) and report the final page's status", async () => {
     const { exitCode, stdout, stderr } = await runCli([
       `${BASE_URL}:${redirectPort}`,
       "--runs",
@@ -186,11 +186,16 @@ describe("bug investigation - TTFB timing", () => {
 
     const results = parseJsonOutput(stdout);
 
-    // Should report the 301 status code, not follow the redirect
-    expect(results.statusCode).toBe(301);
+    // Per spec section 4: the tool follows redirects and reports the final
+    // page's status code (the 2xx/4xx/5xx page), not the 3xx status.
+    expect(results.statusCode).toBe(200);
 
-    // TTFB should be fast (no artificial delay on redirect response)
-    // The redirect server responds immediately
+    // Per-hop timings are retained in the JSON output
+    expect(results).toHaveProperty("hops");
+    expect(Array.isArray(results.hops)).toBe(true);
+    expect(results.hops.length).toBeGreaterThanOrEqual(1);
+
+    // TTFB should reflect the delayed server's 300ms delay
     console.log(`Redirect TTFB median: ${results.stages.ttfb.medianMs}ms`);
     console.log(`Redirect status code: ${results.statusCode}`);
   });

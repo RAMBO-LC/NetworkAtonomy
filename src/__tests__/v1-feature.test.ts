@@ -296,7 +296,9 @@ describe("v1 - Redirect Handling", () => {
   });
 
   it("should error with blocked-redirect error when redirect points to blocked address (10.0.0.1)", async () => {
-    // Mock resolver to throw BlockedAddressError for the redirect target
+    // Mock resolver to throw BlockedAddressError for the redirect target.
+    // We call main() directly (not runCli) because runCli resets the mock
+    // to a permissive default, which would mask the blocked-redirect check.
     const { BlockedAddressError } = await import("../net/resolve");
     mockResolveHostname.mockImplementation(async (hostname: string) => {
       if (hostname === "10.0.0.1") {
@@ -305,16 +307,18 @@ describe("v1 - Redirect Handling", () => {
       return { address: "127.0.0.1", family: "ipv4" as const };
     });
 
-    const { exitCode, stdout, stderr } = await runCli([
+    const { logs, errors, restore } = captureConsole();
+    const exitCode = await main([
       `${BASE_URL}:${blockedRedirectPort}`,
       "--runs",
       "1",
       "--json",
     ]);
+    restore();
 
-    // Should fail with exit code 2 (Blocked Address)
+    // Should fail with exit code 2 (Blocked Address) per spec section 2
     expect(exitCode).toBe(ExitCode.BLOCKED_ADDRESS);
-    expect(stderr).toContain("Error:");
+    expect(errors.join("\n")).toContain("Error:");
   });
 
   it("should error with redirect loop error when URL repeats", async () => {

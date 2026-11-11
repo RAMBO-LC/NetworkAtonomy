@@ -238,6 +238,7 @@ describe("cli - runProbes integration", () => {
       maxBody: undefined,
       rejectUnauthorized: true,
       timeouts: undefined,
+      maxRedirects: 5,
     });
   });
 
@@ -274,7 +275,7 @@ describe("cli - runProbes integration", () => {
 
     const code = await main(["http://example.com"]);
 
-    expect(code).toBe(ExitCode.DNS_FAILED);
+    expect(code).toBe(ExitCode.NETWORK_FAILURE);
   });
 
   it("prints error message on failure", async () => {

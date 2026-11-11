@@ -415,8 +415,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       printResults(results);
     }
 
-    // Exit with non-zero if any runs failed
-    return results.runsFailed > 0 ? ExitCode.NETWORK_FAILURE : ExitCode.OK;
+    // Exit 0: runProbes already throws if ALL runs failed (mapped to NETWORK_FAILURE
+    // by mapErrorToExitCode). Per spec section 7, if at least 1 run succeeds we exit 0
+    // with a warning, which is already in results.warnings.
+    return ExitCode.OK;
   } catch (error) {
     const exitCode = mapErrorToExitCode(error);
     const message = error instanceof Error ? error.message : String(error);

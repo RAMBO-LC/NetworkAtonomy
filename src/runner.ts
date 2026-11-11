@@ -356,8 +356,13 @@ async function executeRuns(
   if (concurrency <= 1) {
     // Sequential execution
     for (let i = 0; i < runs; i++) {
-      const result = await executeSingleRun(options, resolvedHost);
-      results.push(result);
+      try {
+        const result = await executeSingleRun(options, resolvedHost);
+        results.push(result);
+      } catch (error) {
+        // Per spec section 7: a failed run is recorded as a failure, not an abort.
+        results.push({ success: false, error: error instanceof Error ? error : new Error(String(error)) });
+      }
       if (i < runs - 1 && delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
@@ -368,8 +373,13 @@ async function executeRuns(
     const running = new Set<Promise<void>>();
 
     const runNext = async (index: number): Promise<void> => {
-      const result = await executeSingleRun(options, resolvedHost);
-      results[index] = result;
+      try {
+        const result = await executeSingleRun(options, resolvedHost);
+        results[index] = result;
+      } catch (error) {
+        // Per spec section 7: a failed run is recorded as a failure, not an abort.
+        results[index] = { success: false, error: error instanceof Error ? error : new Error(String(error)) };
+      }
       if (delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
