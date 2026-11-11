@@ -37,6 +37,7 @@ interface CliOptions {
   version?: boolean;
   allowPrivate?: boolean;
   maxRedirects?: number;
+  tui?: boolean;
 }
 
 /**
@@ -54,36 +55,36 @@ const ESTIMATED_STAGE_MS = {
  * Parse command-line arguments.
  */
 function parseArgs(args: string[]): CliOptions {
-  const options: CliOptions = {};
+  const options: Partial<CliOptions> = {};
   let positionalArgs: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+    const arg = args[i]!;
 
     if (arg.startsWith("--")) {
       const [flag, value] = arg.slice(2).split("=");
       switch (flag) {
         case "runs":
-          options.runs = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.runs) || options.runs <= 0) {
+          options.runs = parseInt(value ?? args[++i]!, 10);
+          if (isNaN(options.runs!) || options.runs! <= 0) {
             throw new InvalidArgsError("--runs must be a positive integer");
           }
           break;
         case "concurrency":
-          options.concurrency = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.concurrency) || options.concurrency <= 0) {
+          options.concurrency = parseInt(value ?? args[++i]!, 10);
+          if (isNaN(options.concurrency!) || options.concurrency! <= 0) {
             throw new InvalidArgsError("--concurrency must be a positive integer");
           }
           break;
         case "delay":
-          options.delayMs = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.delayMs) || options.delayMs < 0) {
+          options.delayMs = parseInt(value ?? args[++i]!, 10);
+          if (isNaN(options.delayMs!) || options.delayMs! < 0) {
             throw new InvalidArgsError("--delay must be a non-negative integer");
           }
           break;
         case "max-body":
-          options.maxBody = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.maxBody) || options.maxBody <= 0) {
+          options.maxBody = parseInt(value ?? args[++i]!, 10);
+          if (isNaN(options.maxBody!) || options.maxBody! <= 0) {
             throw new InvalidArgsError("--max-body must be a positive integer");
           }
           break;
@@ -110,9 +111,12 @@ function parseArgs(args: string[]): CliOptions {
           break;
         case "max-redirects":
           options.maxRedirects = parseInt(value ?? args[++i] ?? "", 10);
-          if (isNaN(options.maxRedirects) || options.maxRedirects < 0) {
+          if (isNaN(options.maxRedirects!) || options.maxRedirects! < 0) {
             throw new InvalidArgsError("--max-redirects must be a non-negative integer");
           }
+          break;
+        case "tui":
+          options.tui = true;
           break;
         default:
           throw new InvalidArgsError(`Unknown option: --${flag}`);
@@ -145,7 +149,7 @@ function parseArgs(args: string[]): CliOptions {
 
   options.url = positionalArgs[0];
 
-  return options;
+  return options as CliOptions;
 }
 
 /**
@@ -163,16 +167,10 @@ function parseTimeouts(timeoutStr: string): ProbeOptions["timeouts"] {
       if (isNaN(ms) || ms <= 0) {
         throw new InvalidArgsError(`Invalid timeout value for ${stage}: ${value}`);
       }
-      switch (stage) {
-        case "dns":
-        case "tcp":
-        case "tls":
-        case "ttfb":
-        case "body":
-          timeouts[stage] = ms;
-          break;
-        default:
-          throw new InvalidArgsError(`Unknown timeout stage: ${stage}`);
+      if (["dns", "tcp", "tls", "ttfb", "body"].includes(stage)) {
+        timeouts[stage as keyof ProbeOptions["timeouts"]] = ms;
+      } else {
+        throw new InvalidArgsError(`Unknown timeout stage: ${stage}`);
       }
     }
   } else {
@@ -212,6 +210,7 @@ Options:
   --timeout <ms>       Timeout for all stages in milliseconds
   --timeout <spec>     Per-stage timeouts (e.g., "dns=1000,tcp=2000,ttfb=5000")
   --json               Output results as JSON
+  --tui                Launch interactive TUI dashboard
   --explain            Show what would be done without executing
   --help               Show this help message
 
@@ -393,6 +392,25 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
     if (options.explain) {
       await printExplainOutput(options);
+      return ExitCode.OK;
+    }
+
+    if (options.tui) {
+      console.error("TUI mode enabled, importing tui module...");
+      const { runTUI } = await import("./tui");
+      console.error("runTUI imported, calling...");
+      await runTUI({
+        url: options.url,
+        runs: options.runs ?? 5,
+        concurrency: options.concurrency ?? 1,
+        delayMs: options.delayMs ?? 0,
+        maxBody: options.maxBody ?? 10 * 1024 * 1024,
+        rejectUnauthorized: options.insecure ? false : true,
+        timeouts: options.timeout ? parseTimeouts(options.timeout) : undefined,
+        allowPrivate: options.allowPrivate,
+        maxRedirects: options.maxRedirects ?? 5,
+      });
+      console.error("runTUI returned");
       return ExitCode.OK;
     }
 
