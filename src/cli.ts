@@ -54,36 +54,38 @@ const ESTIMATED_STAGE_MS = {
  * Parse command-line arguments.
  */
 function parseArgs(args: string[]): CliOptions {
-  const options: CliOptions = {};
+  const options: Partial<CliOptions> = {};
   let positionalArgs: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if (!arg) continue;
 
     if (arg.startsWith("--")) {
       const [flag, value] = arg.slice(2).split("=");
+      if (!flag) continue;
       switch (flag) {
         case "runs":
-          options.runs = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.runs) || options.runs <= 0) {
+          options.runs = parseInt(value ?? args[++i] ?? "", 10);
+          if (isNaN(options.runs!) || options.runs! <= 0) {
             throw new InvalidArgsError("--runs must be a positive integer");
           }
           break;
         case "concurrency":
-          options.concurrency = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.concurrency) || options.concurrency <= 0) {
+          options.concurrency = parseInt(value ?? args[++i] ?? "", 10);
+          if (isNaN(options.concurrency!) || options.concurrency! <= 0) {
             throw new InvalidArgsError("--concurrency must be a positive integer");
           }
           break;
         case "delay":
-          options.delayMs = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.delayMs) || options.delayMs < 0) {
+          options.delayMs = parseInt(value ?? args[++i] ?? "", 10);
+          if (isNaN(options.delayMs!) || options.delayMs! < 0) {
             throw new InvalidArgsError("--delay must be a non-negative integer");
           }
           break;
         case "max-body":
-          options.maxBody = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.maxBody) || options.maxBody <= 0) {
+          options.maxBody = parseInt(value ?? args[++i] ?? "", 10);
+          if (isNaN(options.maxBody!) || options.maxBody! <= 0) {
             throw new InvalidArgsError("--max-body must be a positive integer");
           }
           break;
@@ -91,7 +93,7 @@ function parseArgs(args: string[]): CliOptions {
           options.insecure = true;
           break;
         case "timeout":
-          options.timeout = value ?? args[++i];
+          options.timeout = value ?? args[++i] ?? "";
           break;
         case "json":
           options.json = true;
@@ -110,7 +112,7 @@ function parseArgs(args: string[]): CliOptions {
           break;
         case "max-redirects":
           options.maxRedirects = parseInt(value ?? args[++i] ?? "", 10);
-          if (isNaN(options.maxRedirects) || options.maxRedirects < 0) {
+          if (isNaN(options.maxRedirects!) || options.maxRedirects! < 0) {
             throw new InvalidArgsError("--max-redirects must be a non-negative integer");
           }
           break;
@@ -143,9 +145,9 @@ function parseArgs(args: string[]): CliOptions {
     throw new InvalidArgsError("Too many positional arguments. Expected only URL.");
   }
 
-  options.url = positionalArgs[0];
+  options.url = positionalArgs[0]!;
 
-  return options;
+  return options as CliOptions;
 }
 
 /**
@@ -158,8 +160,9 @@ function parseTimeouts(timeoutStr: string): ProbeOptions["timeouts"] {
   if (timeoutStr.includes("=")) {
     const pairs = timeoutStr.split(",");
     for (const pair of pairs) {
+      if (!pair) continue;
       const [stage, value] = pair.split("=");
-      const ms = parseInt(value, 10);
+      const ms = parseInt(value ?? "", 10);
       if (isNaN(ms) || ms <= 0) {
         throw new InvalidArgsError(`Invalid timeout value for ${stage}: ${value}`);
       }
@@ -315,7 +318,7 @@ async function printExplainOutput(options: CliOptions): Promise<void> {
   console.log("");
   console.log("Stages to Run:");
   for (const stage of stages) {
-    const timeout = timeouts[stage] ?? "default";
+    const timeout = timeouts?.[stage as keyof typeof timeouts] ?? "default";
     console.log(`  ${stage.toUpperCase()}: ${timeout === "default" ? "default timeout" : `${timeout}ms timeout`}`);
   }
   console.log("");
@@ -335,11 +338,11 @@ function calculateEstimatedTime(
 ): number {
   // Estimate per-run time based on timeouts or defaults
   const perRunEstimate =
-    (timeouts.dns ?? ESTIMATED_STAGE_MS.dns) +
-    (timeouts.tcp ?? ESTIMATED_STAGE_MS.tcp) +
-    (timeouts.tls ?? ESTIMATED_STAGE_MS.tls) +
-    (timeouts.ttfb ?? ESTIMATED_STAGE_MS.ttfb) +
-    (timeouts.body ?? ESTIMATED_STAGE_MS.body);
+    (timeouts?.dns ?? ESTIMATED_STAGE_MS.dns) +
+    (timeouts?.tcp ?? ESTIMATED_STAGE_MS.tcp) +
+    (timeouts?.tls ?? ESTIMATED_STAGE_MS.tls) +
+    (timeouts?.ttfb ?? ESTIMATED_STAGE_MS.ttfb) +
+    (timeouts?.body ?? ESTIMATED_STAGE_MS.body);
 
   // With concurrency, runs are batched
   const batches = Math.ceil(runs / concurrency);
@@ -428,76 +431,34 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 }
 
 /**
- * Maps an error to its corresponding ExitCode based on error type or message content.
+ * Maps an error to its corresponding ExitCode.
+ *
+ * Mapping is by error class / exitCode property only. Message-text matching
+ * was removed: a reworded message could previously change the exit code, and
+ * messages like "timeout" in a TTFB error could mis-map to TIMEOUT (4).
+ * Every NetworkAtonomyError subclass carries its own exitCode; plain Errors
+ * fall through to INTERNAL_ERROR (255).
  */
 function mapErrorToExitCode(error: unknown): ExitCode {
-  // Check for our typed errors first
+  // Typed errors carry their own exit code. This is the only path that maps
+  // to anything other than INTERNAL_ERROR.
   if (error instanceof NetworkAtonomyError) {
     return error.exitCode;
   }
 
-  // Map errors from lower layers based on message content
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-
-    // Redirect loop (exit code 7)
-    if (message.includes("redirect loop")) {
-      return ExitCode.REDIRECT_LOOP;
-    }
-
-    // Too many redirects (exit code 8)
-    if (message.includes("too many redirects")) {
-      return ExitCode.TOO_MANY_REDIRECTS;
-    }
-
-    // SSRF/blocked address errors (exit code 2)
-    if (error instanceof BlockedAddressError || message.includes("ssrf guard blocked") || message.includes("blocked address")) {
-      return ExitCode.BLOCKED_ADDRESS;
-    }
-
-    // Invalid args (validation errors) - check FIRST to catch "Invalid URL" messages before other matching
-    if (message.includes("invalid") || message.includes("missing required") || message.includes("unknown option") || message.includes("short flags") || message.includes("must be a positive") || message.includes("must be a non-negative")) {
-      return ExitCode.INVALID_ARGS;
-    }
-
-    // HTTP errors (exit code 3 - NETWORK_FAILURE) - check BEFORE timeout since TTFB errors contain "timeout"
-    if (message.includes("http") || message.includes("ttfb") || message.includes("body download") || message.includes("response") || message.includes("status code") || message.includes("headers")) {
-      return ExitCode.NETWORK_FAILURE;
-    }
-
-    // Timeout errors (exit code 4)
-    if (message.includes("timeout") || message.includes("timed out") || message.includes("etimedout")) {
-      return ExitCode.TIMEOUT;
-    }
-
-    // DNS resolution errors (exit code 3 - NETWORK_FAILURE)
-    if (error instanceof ResolutionError || message.includes("dns resolution failed") || message.includes("no addresses found") || message.includes("nxdomain")) {
-      return ExitCode.NETWORK_FAILURE;
-    }
-
-    // TCP connection errors (exit code 3 - NETWORK_FAILURE)
-    if (message.includes("connection refused") ||
-        message.includes("econnrefused") ||
-        message.includes("host unreachable") ||
-        message.includes("ehostunreach") ||
-        message.includes("connect") ||
-        message.includes("tcp") ||
-        message.includes("socket")) {
-      return ExitCode.NETWORK_FAILURE;
-    }
-
-    // TLS errors (exit code 3 - NETWORK_FAILURE)
-    if (message.includes("tls") || message.includes("ssl") || message.includes("certificate") || message.includes("handshake") || message.includes("secureconnect") || message.includes("verification")) {
-      return ExitCode.NETWORK_FAILURE;
-    }
-
-    // All runs failed (exit code 3 - NETWORK_FAILURE per spec)
-    if (message.includes("all runs failed")) {
-      return ExitCode.NETWORK_FAILURE;
-    }
+  // BlockedAddressError is NOT a NetworkAtonomyError (it lives in resolve.ts
+  // and is thrown by the SSRF guard before any stage runs). Map it by class.
+  if (error instanceof BlockedAddressError) {
+    return ExitCode.BLOCKED_ADDRESS;
   }
 
-  // Default to internal error for unknown errors
+  // ResolutionError is also a plain Error. Map it by class.
+  if (error instanceof ResolutionError) {
+    return ExitCode.NETWORK_FAILURE;
+  }
+
+  // Everything else is unexpected. Exit 255 so a reworded message or a
+  // surprise subclass can never silently change the exit code.
   return ExitCode.INTERNAL_ERROR;
 }
 

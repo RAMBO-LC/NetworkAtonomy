@@ -8,11 +8,24 @@
 
 import { performance } from "node:perf_hooks";
 import { validateUrl, type ValidUrl } from "./url/validate";
-import { resolveHostname, type ResolvedHost } from "./net/resolve";
+import { resolveHostname, type ResolvedHost, ResolutionError, BlockedAddressError } from "./net/resolve";
 import { measureDns, type DnsTimingResult } from "./stages/dns";
 import { measureTcp, type TcpTimingResult } from "./stages/tcp";
 import { measureTls, type TlsTimingResult } from "./stages/tls";
 import { measureHttp, type HttpTimingResult, type HttpTimingOptions } from "./stages/http";
+import {
+  ExitCode,
+  NetworkAtonomyError,
+  InvalidArgsError,
+  RedirectLoopError,
+  TooManyRedirectsError,
+  TimeoutError,
+  InternalError,
+  TcpFailedError,
+  TlsFailedError,
+  HttpFailedError,
+  DnsFailedError,
+} from "./errors";
 
 /**
  * Timing results for a single run across all stages.
@@ -209,7 +222,7 @@ async function executeSingleRun(
     // Check for redirect loop
     const urlKey = currentUrl.input;
     if (visitedUrls.has(urlKey)) {
-      throw new Error(`Redirect loop detected: ${urlKey}`);
+      throw new RedirectLoopError(`Redirect loop detected: ${urlKey}`);
     }
     visitedUrls.add(urlKey);
 
@@ -217,35 +230,60 @@ async function executeSingleRun(
 
     try {
       // Stage 1: DNS Resolution
-      const dnsStart = performance.now();
-      const dnsResult = await measureDns(hostname, options.dnsResolver);
-      const dnsMs = performance.now() - dnsStart;
+      let dnsResult: DnsTimingResult;
+      let dnsMs: number;
+      try {
+        const dnsStart = performance.now();
+        dnsResult = await measureDns(hostname, options.dnsResolver);
+        dnsMs = performance.now() - dnsStart;
+      } catch (err) {
+        throw new DnsFailedError(err instanceof Error ? err.message : String(err));
+      }
 
       // Stage 2: TCP Connection
-      const tcpResult = await measureTcp(currentResolvedHost.address, port);
-      const tcpMs = tcpResult.durationMs;
+      let tcpResult: TcpTimingResult;
+      let tcpMs: number;
+      try {
+        tcpResult = await measureTcp(currentResolvedHost.address, port);
+        tcpMs = tcpResult.durationMs;
+      } catch (err) {
+        throw new TcpFailedError(err instanceof Error ? err.message : String(err));
+      }
 
       // Stage 3: TLS Handshake
-      const tlsResult = await measureTls({
-        socket: tcpResult.socket,
-        hostname,
-        protocol: scheme + ":",
-        rejectUnauthorized,
-      });
-      const tlsMs = tlsResult.durationMs;
+      let tlsResult: TlsTimingResult;
+      let tlsMs: number;
+      try {
+        tlsResult = await measureTls({
+          socket: tcpResult.socket,
+          hostname,
+          protocol: scheme + ":",
+          rejectUnauthorized,
+        });
+        tlsMs = tlsResult.durationMs;
+      } catch (err) {
+        throw new TlsFailedError(err instanceof Error ? err.message : String(err));
+      }
 
       // Stage 4 & 5: HTTP Request (TTFB + Body)
-      const httpOptions: HttpTimingOptions = {
-        socket: tlsResult.socket,
-        hostname,
-        path: currentUrl.input.includes("://") ? new URL(currentUrl.input).pathname + new URL(currentUrl.input).search : "/",
-        port: port !== (scheme === "http" ? 80 : 443) ? port : undefined,
-        maxBody,
-        protocol: scheme + ":",
-      };
-      const httpResult = await measureHttp(httpOptions);
-      const ttfbMs = httpResult.ttfbMs;
-      const bodyMs = httpResult.bodyMs;
+      let httpResult: HttpTimingResult;
+      let ttfbMs: number;
+      let bodyMs: number;
+      try {
+        const httpOptions: HttpTimingOptions = {
+          socket: tlsResult.socket,
+          hostname,
+          path: currentUrl.input.includes("://") ? new URL(currentUrl.input).pathname + new URL(currentUrl.input).search : "/",
+          port: port !== (scheme === "http" ? 80 : 443) ? port : undefined,
+          maxBody,
+          protocol: scheme + ":",
+        };
+        httpResult = await measureHttp(httpOptions);
+        ttfbMs = httpResult.ttfbMs;
+        bodyMs = httpResult.bodyMs;
+      } catch (err) {
+        throw new HttpFailedError(err instanceof Error ? err.message : String(err));
+      }
 
       const totalMs = dnsMs + tcpMs + tlsMs + ttfbMs + bodyMs;
 
@@ -286,7 +324,7 @@ async function executeSingleRun(
 
       // It's a redirect - check if we've exceeded max redirects
       if (hop >= maxHops) {
-        throw new Error(`Too many redirects (max: ${maxHops})`);
+        throw new TooManyRedirectsError(`Too many redirects (max: ${maxHops})`);
       }
 
       // Follow the redirect
@@ -300,12 +338,12 @@ async function executeSingleRun(
       try {
         redirectUrl = new URL(location, currentUrl.input);
       } catch {
-        throw new Error(`Invalid Location header: ${location}`);
+        throw new InvalidArgsError(`Invalid Location header: ${location}`);
       }
 
       // Validate scheme - only http or https allowed
       if (redirectUrl.protocol !== "http:" && redirectUrl.protocol !== "https:") {
-        throw new Error(`Redirect to unsupported scheme: ${redirectUrl.protocol}`);
+        throw new InvalidArgsError(`Redirect to unsupported scheme: ${redirectUrl.protocol}`);
       }
 
       // Resolve the new hostname with SSRF check
@@ -331,7 +369,7 @@ async function executeSingleRun(
   }
 
   if (!finalRunTiming) {
-    throw new Error("Too many redirects");
+    throw new TooManyRedirectsError("Too many redirects");
   }
 
   return {
@@ -417,7 +455,7 @@ export async function runProbes(
   // Validate URL
   const validation = validateUrl(inputUrl);
   if (!validation.ok) {
-    throw new Error(`Error: ${validation.message}`);
+    throw new InvalidArgsError(`Error: ${validation.message}`);
   }
 
   const { runs = 5, ...probeOptions } = options;
@@ -436,7 +474,16 @@ export async function runProbes(
   // If all runs failed, throw an error
   if (successfulRuns.length === 0) {
     const firstError = failedRuns[0]?.error;
-    throw firstError ?? new Error("All runs failed with unknown error");
+    // BlockedAddressError and ResolutionError are not NetworkAtonomyError
+    // subclasses (they live in resolve.ts). Re-throw them directly so
+    // mapErrorToExitCode in cli.ts can map them by class.
+    if (firstError instanceof BlockedAddressError || firstError instanceof ResolutionError) {
+      throw firstError;
+    }
+    if (firstError instanceof NetworkAtonomyError) {
+      throw firstError;
+    }
+    throw new InternalError(firstError?.message ?? "All runs failed with unknown error");
   }
 
   // Collect timing values per stage

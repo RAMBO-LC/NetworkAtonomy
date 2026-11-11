@@ -6,9 +6,13 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit false --outDir dist",
+    "dev": "tsx src/cli.ts"
   },
   "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.19.0",
     "typescript": "^5.9.3",
     "vitest": "^5.1.0"
   }
