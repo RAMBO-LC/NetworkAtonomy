@@ -23,7 +23,10 @@ export enum ExitCode {
 
 /**
  * Base class for all Network Atonomy errors.
- * Provides a consistent way to identify error categories and their exit codes.
+ *
+ * Every subclass carries a single, immutable `exitCode` property. The CLI's
+ * `mapErrorToExitCode` reads that property and never inspects the error
+ * message, so a reworded message can never change the exit code.
  */
 export abstract class NetworkAtonomyError extends Error {
   public readonly exitCode: ExitCode;

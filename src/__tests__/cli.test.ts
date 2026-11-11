@@ -5,7 +5,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { main } from "../cli";
 import { runProbes, printResults, formatMs, type AggregatedResults } from "../runner";
-import { ExitCode } from "../errors";
+import { ResolutionError, BlockedAddressError } from "../net/resolve";
+import {
+  ExitCode,
+  TcpFailedError,
+  TimeoutError,
+  TlsFailedError,
+  HttpFailedError,
+  AllRunsFailedError,
+  InvalidArgsError,
+  RedirectLoopError,
+  TooManyRedirectsError,
+  DnsFailedError,
+} from "../errors";
 
 // Mock runProbes
 vi.mock("../runner", async (importOriginal) => {
@@ -271,7 +283,7 @@ describe("cli - runProbes integration", () => {
   });
 
   it("handles runProbes error and returns exit code", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("DNS resolution failed"));
+    mockRunProbesFn.mockRejectedValue(new DnsFailedError("DNS resolution failed"));
 
     const code = await main(["http://example.com"]);
 
@@ -280,7 +292,7 @@ describe("cli - runProbes integration", () => {
 
   it("prints error message on failure", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mockRunProbesFn.mockRejectedValue(new Error("Connection refused"));
+    mockRunProbesFn.mockRejectedValue(new TcpFailedError("Connection refused"));
 
     await main(["http://example.com"]);
 
@@ -341,16 +353,16 @@ describe("cli - exit code mapping", () => {
     vi.clearAllMocks();
   });
 
-  it("returns DNS_FAILED for DNS resolution errors", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("DNS resolution failed for example.com: no addresses found"));
+  it("returns NETWORK_FAILURE for DNS resolution errors", async () => {
+    mockRunProbesFn.mockRejectedValue(new ResolutionError("example.com"));
 
     const code = await main(["http://example.com"]);
 
     expect(code).toBe(ExitCode.NETWORK_FAILURE);
   });
 
-  it("returns NETWORK_FAILURE for SSRF blocked addresses", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("SSRF guard blocked example.com: 127.0.0.1"));
+  it("returns BLOCKED_ADDRESS for SSRF blocked addresses", async () => {
+    mockRunProbesFn.mockRejectedValue(new BlockedAddressError("example.com", ["127.0.0.1"]));
 
     const code = await main(["http://example.com"]);
 
@@ -358,7 +370,7 @@ describe("cli - exit code mapping", () => {
   });
 
   it("returns NETWORK_FAILURE for connection refused", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("Connection refused"));
+    mockRunProbesFn.mockRejectedValue(new TcpFailedError("Connection refused"));
 
     const code = await main(["http://example.com"]);
 
@@ -366,7 +378,7 @@ describe("cli - exit code mapping", () => {
   });
 
   it("returns TIMEOUT for connection timeout", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("ETIMEDOUT"));
+    mockRunProbesFn.mockRejectedValue(new TimeoutError("ETIMEDOUT"));
 
     const code = await main(["http://example.com"]);
 
@@ -374,7 +386,7 @@ describe("cli - exit code mapping", () => {
   });
 
   it("returns NETWORK_FAILURE for TLS handshake errors", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("TLS handshake failed: certificate verify failed"));
+    mockRunProbesFn.mockRejectedValue(new TlsFailedError("TLS handshake failed: certificate verify failed"));
 
     const code = await main(["https://example.com"]);
 
@@ -382,7 +394,7 @@ describe("cli - exit code mapping", () => {
   });
 
   it("returns NETWORK_FAILURE for SSL errors", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("SSL error: self signed certificate"));
+    mockRunProbesFn.mockRejectedValue(new TlsFailedError("SSL error: self signed certificate"));
 
     const code = await main(["https://example.com"]);
 
@@ -390,7 +402,7 @@ describe("cli - exit code mapping", () => {
   });
 
   it("returns NETWORK_FAILURE for HTTP response errors", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("HTTP response error: 500 Internal Server Error"));
+    mockRunProbesFn.mockRejectedValue(new HttpFailedError("HTTP response error: 500 Internal Server Error"));
 
     const code = await main(["http://example.com"]);
 
@@ -398,7 +410,7 @@ describe("cli - exit code mapping", () => {
   });
 
   it("returns NETWORK_FAILURE for TTFB errors", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("TTFB timeout"));
+    mockRunProbesFn.mockRejectedValue(new HttpFailedError("TTFB timeout"));
 
     const code = await main(["http://example.com"]);
 
@@ -406,7 +418,7 @@ describe("cli - exit code mapping", () => {
   });
 
   it("returns NETWORK_FAILURE for body download errors", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("Body download failed: socket closed"));
+    mockRunProbesFn.mockRejectedValue(new HttpFailedError("Body download failed: socket closed"));
 
     const code = await main(["http://example.com"]);
 
@@ -414,7 +426,7 @@ describe("cli - exit code mapping", () => {
   });
 
   it("returns NETWORK_FAILURE when all runs fail", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("All runs failed with unknown error"));
+    mockRunProbesFn.mockRejectedValue(new AllRunsFailedError("All runs failed with unknown error"));
 
     const code = await main(["http://example.com"]);
 
@@ -422,11 +434,27 @@ describe("cli - exit code mapping", () => {
   });
 
   it("returns INVALID_ARGS for validation errors", async () => {
-    mockRunProbesFn.mockRejectedValue(new Error("Invalid URL: missing scheme"));
+    mockRunProbesFn.mockRejectedValue(new InvalidArgsError("Invalid URL: missing required scheme"));
 
-    const code = await main(["invalid-url"]);
+    const code = await main(["http://example.com"]);
 
     expect(code).toBe(ExitCode.INVALID_ARGS);
+  });
+
+  it("returns REDIRECT_LOOP for redirect loops", async () => {
+    mockRunProbesFn.mockRejectedValue(new RedirectLoopError("Redirect loop detected: http://example.com"));
+
+    const code = await main(["http://example.com"]);
+
+    expect(code).toBe(ExitCode.REDIRECT_LOOP);
+  });
+
+  it("returns TOO_MANY_REDIRECTS for exceeding max redirects", async () => {
+    mockRunProbesFn.mockRejectedValue(new TooManyRedirectsError("Too many redirects (max: 5)"));
+
+    const code = await main(["http://example.com"]);
+
+    expect(code).toBe(ExitCode.TOO_MANY_REDIRECTS);
   });
 
   it("prints errors to stderr, not stdout", async () => {

@@ -446,76 +446,34 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 }
 
 /**
- * Maps an error to its corresponding ExitCode based on error type or message content.
+ * Maps an error to its corresponding ExitCode.
+ *
+ * Mapping is by error class / exitCode property only. Message-text matching
+ * was removed: a reworded message could previously change the exit code, and
+ * messages like "timeout" in a TTFB error could mis-map to TIMEOUT (4).
+ * Every NetworkAtonomyError subclass carries its own exitCode; plain Errors
+ * fall through to INTERNAL_ERROR (255).
  */
 function mapErrorToExitCode(error: unknown): ExitCode {
-  // Check for our typed errors first
+  // Typed errors carry their own exit code. This is the only path that maps
+  // to anything other than INTERNAL_ERROR.
   if (error instanceof NetworkAtonomyError) {
     return error.exitCode;
   }
 
-  // Map errors from lower layers based on message content
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-
-    // Redirect loop (exit code 7)
-    if (message.includes("redirect loop")) {
-      return ExitCode.REDIRECT_LOOP;
-    }
-
-    // Too many redirects (exit code 8)
-    if (message.includes("too many redirects")) {
-      return ExitCode.TOO_MANY_REDIRECTS;
-    }
-
-    // SSRF/blocked address errors (exit code 2)
-    if (error instanceof BlockedAddressError || message.includes("ssrf guard blocked") || message.includes("blocked address")) {
-      return ExitCode.BLOCKED_ADDRESS;
-    }
-
-    // Invalid args (validation errors) - check FIRST to catch "Invalid URL" messages before other matching
-    if (message.includes("invalid") || message.includes("missing required") || message.includes("unknown option") || message.includes("short flags") || message.includes("must be a positive") || message.includes("must be a non-negative")) {
-      return ExitCode.INVALID_ARGS;
-    }
-
-    // HTTP errors (exit code 3 - NETWORK_FAILURE) - check BEFORE timeout since TTFB errors contain "timeout"
-    if (message.includes("http") || message.includes("ttfb") || message.includes("body download") || message.includes("response") || message.includes("status code") || message.includes("headers")) {
-      return ExitCode.NETWORK_FAILURE;
-    }
-
-    // Timeout errors (exit code 4)
-    if (message.includes("timeout") || message.includes("timed out") || message.includes("etimedout")) {
-      return ExitCode.TIMEOUT;
-    }
-
-    // DNS resolution errors (exit code 3 - NETWORK_FAILURE)
-    if (error instanceof ResolutionError || message.includes("dns resolution failed") || message.includes("no addresses found") || message.includes("nxdomain")) {
-      return ExitCode.NETWORK_FAILURE;
-    }
-
-    // TCP connection errors (exit code 3 - NETWORK_FAILURE)
-    if (message.includes("connection refused") ||
-        message.includes("econnrefused") ||
-        message.includes("host unreachable") ||
-        message.includes("ehostunreach") ||
-        message.includes("connect") ||
-        message.includes("tcp") ||
-        message.includes("socket")) {
-      return ExitCode.NETWORK_FAILURE;
-    }
-
-    // TLS errors (exit code 3 - NETWORK_FAILURE)
-    if (message.includes("tls") || message.includes("ssl") || message.includes("certificate") || message.includes("handshake") || message.includes("secureconnect") || message.includes("verification")) {
-      return ExitCode.NETWORK_FAILURE;
-    }
-
-    // All runs failed (exit code 3 - NETWORK_FAILURE per spec)
-    if (message.includes("all runs failed")) {
-      return ExitCode.NETWORK_FAILURE;
-    }
+  // BlockedAddressError is NOT a NetworkAtonomyError (it lives in resolve.ts
+  // and is thrown by the SSRF guard before any stage runs). Map it by class.
+  if (error instanceof BlockedAddressError) {
+    return ExitCode.BLOCKED_ADDRESS;
   }
 
-  // Default to internal error for unknown errors
+  // ResolutionError is also a plain Error. Map it by class.
+  if (error instanceof ResolutionError) {
+    return ExitCode.NETWORK_FAILURE;
+  }
+
+  // Everything else is unexpected. Exit 255 so a reworded message or a
+  // surprise subclass can never silently change the exit code.
   return ExitCode.INTERNAL_ERROR;
 }
 

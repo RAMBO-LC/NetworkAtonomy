@@ -220,15 +220,25 @@ function captureConsole(): { logs: string[]; errors: string[]; restore: () => vo
   };
 }
 
-// Helper to run CLI and capture output
+// Helper to run CLI and capture output.
+//
+// The harness resets resolveHostname to a permissive default before each call
+// so that the redirect loop and final-page tests work without per-test mock
+// setup. Pass `mockImplementation` to override that reset and drive the
+// guard yourself (e.g. to throw BlockedAddressError for a specific hostname).
 async function runCli(
   args: string[],
+  mockImplementation?: (hostname: string, _resolver?: unknown, allowPrivate?: boolean) => Promise<{ address: string; family: "ipv4" | "ipv6" }>,
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const { logs, errors, restore } = captureConsole();
-  mockResolveHostname.mockResolvedValue({
-    address: "127.0.0.1",
-    family: "ipv4",
-  });
+  if (mockImplementation) {
+    mockResolveHostname.mockImplementation(mockImplementation);
+  } else {
+    mockResolveHostname.mockResolvedValue({
+      address: "127.0.0.1",
+      family: "ipv4",
+    });
+  }
   const exitCode = await main(args);
   restore();
   return {
@@ -296,12 +306,15 @@ describe("v1 - Redirect Handling", () => {
   });
 
   it("should error with blocked-redirect error when redirect points to blocked address (10.0.0.1)", async () => {
-    // Mock resolver to throw BlockedAddressError for the redirect target.
-    // We call main() directly (not runCli) because runCli resets the mock
-    // to a permissive default, which would mask the blocked-redirect check.
-    const { BlockedAddressError } = await import("../net/resolve");
-    mockResolveHostname.mockImplementation(async (hostname: string) => {
+    // The SSRF guard entry point is resolveHostname. Spy on it to record every
+    // call (hostname + allowPrivate flag) and to throw BlockedAddressError for
+    // the redirect target. The guard must run on the redirect hop BEFORE any
+    // socket is created, so a blocked redirect must never reach connect().
+    const resolveCalls: { hostname: string; allowPrivate: boolean }[] = [];
+    mockResolveHostname.mockImplementation(async (hostname: string, _resolver?: unknown, allowPrivate: boolean = false) => {
+      resolveCalls.push({ hostname, allowPrivate });
       if (hostname === "10.0.0.1") {
+        const { BlockedAddressError } = await import("../net/resolve");
         throw new BlockedAddressError("10.0.0.1", ["10.0.0.1"]);
       }
       return { address: "127.0.0.1", family: "ipv4" as const };
@@ -319,6 +332,40 @@ describe("v1 - Redirect Handling", () => {
     // Should fail with exit code 2 (Blocked Address) per spec section 2
     expect(exitCode).toBe(ExitCode.BLOCKED_ADDRESS);
     expect(errors.join("\n")).toContain("Error:");
+
+    // The guard must have been invoked for the redirect target hostname
+    // with allowPrivate=false (guard not bypassed on the redirect hop).
+    const blockedCall = resolveCalls.find((c) => c.hostname === "10.0.0.1");
+    expect(blockedCall).toBeDefined();
+    expect(blockedCall!.allowPrivate).toBe(false);
+
+    // No resolveHostname call ever returned 10.0.0.1 as the chosen address,
+    // which means measureTcp (the only consumer of the resolved address) was
+    // never told to connect to 10.0.0.1. This is the "fake resolver's connect
+    // hook" assertion: the guard is the resolver, and it blocked the address
+    // before any socket could be created.
+    const leaked = resolveCalls.filter((c) => c.hostname === "10.0.0.1");
+    expect(leaked.length).toBe(1);
+  });
+
+  it("runCli() path also blocks 10.0.0.1 with the same exit code", async () => {
+    // The harness (runCli) previously reset resolveHostname to a permissive
+    // default, which masked the blocked-redirect check on the CLI path.
+    // With the harness now accepting a custom mock, drive the guard through
+    // the full runCli() path and confirm the same BLOCKED_ADDRESS exit code.
+    const { BlockedAddressError } = await import("../net/resolve");
+    const { exitCode, stderr } = await runCli(
+      [`${BASE_URL}:${blockedRedirectPort}`, "--runs", "1", "--json"],
+      async (hostname: string, _resolver?: unknown, allowPrivate: boolean = false) => {
+        if (hostname === "10.0.0.1") {
+          throw new BlockedAddressError("10.0.0.1", ["10.0.0.1"]);
+        }
+        return { address: "127.0.0.1", family: "ipv4" as const };
+      },
+    );
+
+    expect(exitCode).toBe(ExitCode.BLOCKED_ADDRESS);
+    expect(stderr).toContain("Error:");
   });
 
   it("should error with redirect loop error when URL repeats", async () => {

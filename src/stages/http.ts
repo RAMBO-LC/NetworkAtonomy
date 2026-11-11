@@ -157,9 +157,9 @@ export async function measureHttp(options: HttpTimingOptions): Promise<HttpTimin
           headersComplete = true;
           // Parse status line
           const headerText = headerBuffer.subarray(0, headerEnd).toString("utf8");
-          const statusLine = headerText.split("\r\n")[0];
+          const statusLine = headerText.split("\r\n")[0] ?? "";
           const match = statusLine.match(/^HTTP\/\d\.\d\s+(\d{3})/);
-          if (match) {
+          if (match && match[1]) {
             statusCode = parseInt(match[1], 10);
           } else {
             // Invalid status line - but we continue
@@ -168,7 +168,7 @@ export async function measureHttp(options: HttpTimingOptions): Promise<HttpTimin
 
           // Extract Location header
           const locationMatch = headerText.match(/^Location:\s*(.+)$/im);
-          if (locationMatch) {
+          if (locationMatch && locationMatch[1]) {
             location = locationMatch[1].trim();
           }
 
