@@ -13,7 +13,9 @@
     "url",
     "ip",
     "family",
-    "warnings"
+    "statusCode",
+    "warnings",
+    "hops"
   ],
   "additionalProperties": false,
   "properties": {
@@ -59,10 +61,41 @@
       "enum": ["IPv4", "IPv6"],
       "description": "Address family of the connected IP"
     },
+    "statusCode": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599,
+      "description": "HTTP status code of the response"
+    },
     "warnings": {
       "type": "array",
       "items": { "type": "string" },
       "description": "Warnings from failed runs (if any)"
+    },
+    "hops": {
+      "type": "array",
+      "description": "Per-hop timing results for redirect chain",
+      "items": {
+        "type": "object",
+        "required": ["url", "statusCode", "stages"],
+        "additionalProperties": false,
+        "properties": {
+          "url": { "type": "string", "format": "uri" },
+          "statusCode": { "type": "integer", "minimum": 100, "maximum": 599 },
+          "stages": {
+            "type": "object",
+            "required": ["dns", "tcp", "tls", "ttfb", "body"],
+            "additionalProperties": false,
+            "properties": {
+              "dns": { "$ref": "#/$defs/stageStats" },
+              "tcp": { "$ref": "#/$defs/stageStats" },
+              "tls": { "$ref": "#/$defs/stageStats" },
+              "ttfb": { "$ref": "#/$defs/stageStats" },
+              "body": { "$ref": "#/$defs/stageStats" }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

@@ -15,7 +15,10 @@ import {
   TcpFailedError,
   TlsFailedError,
   HttpFailedError,
+  TimeoutError,
   AllRunsFailedError,
+  RedirectLoopError,
+  TooManyRedirectsError,
   InternalError,
   getExitCode,
 } from "./errors";
@@ -32,6 +35,9 @@ interface CliOptions {
   explain?: boolean;
   help?: boolean;
   version?: boolean;
+  allowPrivate?: boolean;
+  maxRedirects?: number;
+  tui?: boolean;
 }
 
 /**
@@ -49,36 +55,36 @@ const ESTIMATED_STAGE_MS = {
  * Parse command-line arguments.
  */
 function parseArgs(args: string[]): CliOptions {
-  const options: CliOptions = {};
+  const options: Partial<CliOptions> = {};
   let positionalArgs: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+    const arg = args[i]!;
 
     if (arg.startsWith("--")) {
       const [flag, value] = arg.slice(2).split("=");
       switch (flag) {
         case "runs":
-          options.runs = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.runs) || options.runs <= 0) {
+          options.runs = parseInt(value ?? args[++i]!, 10);
+          if (isNaN(options.runs!) || options.runs! <= 0) {
             throw new InvalidArgsError("--runs must be a positive integer");
           }
           break;
         case "concurrency":
-          options.concurrency = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.concurrency) || options.concurrency <= 0) {
+          options.concurrency = parseInt(value ?? args[++i]!, 10);
+          if (isNaN(options.concurrency!) || options.concurrency! <= 0) {
             throw new InvalidArgsError("--concurrency must be a positive integer");
           }
           break;
         case "delay":
-          options.delayMs = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.delayMs) || options.delayMs < 0) {
+          options.delayMs = parseInt(value ?? args[++i]!, 10);
+          if (isNaN(options.delayMs!) || options.delayMs! < 0) {
             throw new InvalidArgsError("--delay must be a non-negative integer");
           }
           break;
         case "max-body":
-          options.maxBody = parseInt(value ?? args[++i], 10);
-          if (isNaN(options.maxBody) || options.maxBody <= 0) {
+          options.maxBody = parseInt(value ?? args[++i]!, 10);
+          if (isNaN(options.maxBody!) || options.maxBody! <= 0) {
             throw new InvalidArgsError("--max-body must be a positive integer");
           }
           break;
@@ -99,6 +105,18 @@ function parseArgs(args: string[]): CliOptions {
           break;
         case "version":
           options.version = true;
+          break;
+        case "allow-private":
+          options.allowPrivate = true;
+          break;
+        case "max-redirects":
+          options.maxRedirects = parseInt(value ?? args[++i] ?? "", 10);
+          if (isNaN(options.maxRedirects!) || options.maxRedirects! < 0) {
+            throw new InvalidArgsError("--max-redirects must be a non-negative integer");
+          }
+          break;
+        case "tui":
+          options.tui = true;
           break;
         default:
           throw new InvalidArgsError(`Unknown option: --${flag}`);
@@ -131,34 +149,33 @@ function parseArgs(args: string[]): CliOptions {
 
   options.url = positionalArgs[0];
 
-  return options;
+  return options as CliOptions;
 }
 
 /**
  * Parse timeout string into per-stage timeouts.
  * Format: "dns=1000,tcp=2000,tls=3000,ttfb=5000,body=10000" or just "5000" for all stages.
  */
-function parseTimeouts(timeoutStr: string): ProbeOptions["timeouts"] {
-  const timeouts: ProbeOptions["timeouts"] = {};
+function parseTimeouts(timeoutStr: string): { dns?: number; tcp?: number; tls?: number; ttfb?: number; body?: number } {
+  const timeouts: { dns?: number; tcp?: number; tls?: number; ttfb?: number; body?: number } = {};
 
   if (timeoutStr.includes("=")) {
     const pairs = timeoutStr.split(",");
     for (const pair of pairs) {
-      const [stage, value] = pair.split("=");
+      const parts = pair.split("=");
+      const stage = parts[0];
+      const value = parts[1];
+      if (!stage || !value) {
+        throw new InvalidArgsError(`Invalid timeout format: ${pair}`);
+      }
       const ms = parseInt(value, 10);
       if (isNaN(ms) || ms <= 0) {
         throw new InvalidArgsError(`Invalid timeout value for ${stage}: ${value}`);
       }
-      switch (stage) {
-        case "dns":
-        case "tcp":
-        case "tls":
-        case "ttfb":
-        case "body":
-          timeouts[stage] = ms;
-          break;
-        default:
-          throw new InvalidArgsError(`Unknown timeout stage: ${stage}`);
+      if (["dns", "tcp", "tls", "ttfb", "body"].includes(stage)) {
+        timeouts[stage as keyof typeof timeouts] = ms;
+      } else {
+        throw new InvalidArgsError(`Unknown timeout stage: ${stage}`);
       }
     }
   } else {
@@ -193,9 +210,12 @@ Options:
   --delay <ms>         Delay between runs in milliseconds (default: 0)
   --max-body <bytes>   Maximum response body bytes to read (default: 10485760)
   --insecure           Skip TLS certificate verification
+  --allow-private      Allow private/loopback addresses (bypass SSRF guard)
+  --max-redirects <n>  Maximum redirect hops to follow (default: 5)
   --timeout <ms>       Timeout for all stages in milliseconds
   --timeout <spec>     Per-stage timeouts (e.g., "dns=1000,tcp=2000,ttfb=5000")
   --json               Output results as JSON
+  --tui                Launch interactive TUI dashboard
   --explain            Show what would be done without executing
   --help               Show this help message
 
@@ -204,6 +224,7 @@ Examples:
   npx networkatonomy https://example.com --runs 10 --concurrency 2
   npx networkatonomy https://example.com --timeout 5000 --json
   npx networkatonomy https://example.com --timeout "dns=1000,tcp=2000,tls=3000,ttfb=5000,body=10000"
+  npx networkatonomy http://127.0.0.1:8080 --allow-private
 `.trim();
 }
 
@@ -214,16 +235,13 @@ function printJson(results: AggregatedResults): void {
   console.log(JSON.stringify(results, null, 2));
 }
 
-/**
- * Print enhanced explain output showing parsed options, resolved config,
- * estimated time, and stages that will run.
- */
 async function printExplainOutput(options: CliOptions): Promise<void> {
   const runs = options.runs ?? 5;
   const concurrency = options.concurrency ?? 1;
   const delayMs = options.delayMs ?? 0;
   const maxBody = options.maxBody ?? 10 * 1024 * 1024;
   const insecure = options.insecure ?? false;
+  const allowPrivate = options.allowPrivate ?? false;
   const timeoutStr = options.timeout ?? "none";
   const outputFormat = options.json ? "JSON" : "human-readable table";
 
@@ -248,7 +266,7 @@ async function printExplainOutput(options: CliOptions): Promise<void> {
   let resolutionError: string | null = null;
 
   try {
-    const resolved = await resolveHostname(validation.hostname, defaultDnsResolver);
+    const resolved = await resolveHostname(validation.hostname, defaultDnsResolver, allowPrivate);
     resolvedIp = resolved.address;
     resolvedFamily = resolved.family === "ipv4" ? "IPv4" : "IPv6";
   } catch (error) {
@@ -262,7 +280,7 @@ async function printExplainOutput(options: CliOptions): Promise<void> {
   }
 
   // Parse timeouts for estimation
-  const timeouts = options.timeout ? parseTimeouts(options.timeout) : {};
+  const timeouts: { dns?: number; tcp?: number; tls?: number; ttfb?: number; body?: number } = options.timeout ? parseTimeouts(options.timeout) : {};
 
   // Calculate estimated time
   const estimatedTimeMs = calculateEstimatedTime(runs, concurrency, delayMs, timeouts);
@@ -279,6 +297,7 @@ async function printExplainOutput(options: CliOptions): Promise<void> {
   console.log(`  Delay: ${delayMs}ms`);
   console.log(`  Max body: ${maxBody} bytes`);
   console.log(`  Insecure (skip TLS verify): ${insecure}`);
+  console.log(`  Allow private addresses: ${allowPrivate}`);
   console.log(`  Timeout: ${timeoutStr}`);
   console.log(`  Output format: ${outputFormat}`);
   console.log("");
@@ -296,7 +315,7 @@ async function printExplainOutput(options: CliOptions): Promise<void> {
   console.log("");
   console.log("Stages to Run:");
   for (const stage of stages) {
-    const timeout = timeouts[stage] ?? "default";
+    const timeout = timeouts[stage as keyof typeof timeouts] ?? "default";
     console.log(`  ${stage.toUpperCase()}: ${timeout === "default" ? "default timeout" : `${timeout}ms timeout`}`);
   }
   console.log("");
@@ -312,7 +331,7 @@ function calculateEstimatedTime(
   runs: number,
   concurrency: number,
   delayMs: number,
-  timeouts: ProbeOptions["timeouts"]
+  timeouts: { dns?: number; tcp?: number; tls?: number; ttfb?: number; body?: number }
 ): number {
   // Estimate per-run time based on timeouts or defaults
   const perRunEstimate =
@@ -377,6 +396,26 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return ExitCode.OK;
     }
 
+    if (options.tui) {
+      console.error("TUI mode enabled, importing tui module...");
+      const { runTUI } = await import("./tui");
+      console.error("runTUI imported, calling...");
+      const timeouts = options.timeout ? parseTimeouts(options.timeout) : undefined;
+      await runTUI({
+        url: options.url,
+        runs: options.runs ?? 5,
+        concurrency: options.concurrency ?? 1,
+        delayMs: options.delayMs ?? 0,
+        maxBody: options.maxBody ?? 10 * 1024 * 1024,
+        rejectUnauthorized: options.insecure ? false : true,
+        timeouts,
+        allowPrivate: options.allowPrivate,
+        maxRedirects: options.maxRedirects ?? 5,
+      });
+      console.error("runTUI returned");
+      return ExitCode.OK;
+    }
+
     const probeOptions: Omit<ProbeOptions, "url"> = {
       runs: options.runs,
       concurrency: options.concurrency,
@@ -384,6 +423,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       maxBody: options.maxBody,
       rejectUnauthorized: options.insecure ? false : true,
       timeouts: options.timeout ? parseTimeouts(options.timeout) : undefined,
+      allowPrivate: options.allowPrivate,
+      maxRedirects: options.maxRedirects ?? 5,
     };
 
     const results = await runProbes(options.url, probeOptions);
@@ -394,8 +435,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       printResults(results);
     }
 
-    // Exit with non-zero if any runs failed
-    return results.runsFailed > 0 ? ExitCode.ALL_RUNS_FAILED : ExitCode.OK;
+    // Exit 0: runProbes already throws if ALL runs failed (mapped to NETWORK_FAILURE
+    // by mapErrorToExitCode). Per spec section 7, if at least 1 run succeeds we exit 0
+    // with a warning, which is already in results.warnings.
+    return ExitCode.OK;
   } catch (error) {
     const exitCode = mapErrorToExitCode(error);
     const message = error instanceof Error ? error.message : String(error);
@@ -405,69 +448,34 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 }
 
 /**
- * Maps an error to its corresponding ExitCode based on error type or message content.
+ * Maps an error to its corresponding ExitCode.
+ *
+ * Mapping is by error class / exitCode property only. Message-text matching
+ * was removed: a reworded message could previously change the exit code, and
+ * messages like "timeout" in a TTFB error could mis-map to TIMEOUT (4).
+ * Every NetworkAtonomyError subclass carries its own exitCode; plain Errors
+ * fall through to INTERNAL_ERROR (255).
  */
 function mapErrorToExitCode(error: unknown): ExitCode {
-  // Check for our typed errors first
+  // Typed errors carry their own exit code. This is the only path that maps
+  // to anything other than INTERNAL_ERROR.
   if (error instanceof NetworkAtonomyError) {
     return error.exitCode;
   }
 
-  // Map errors from lower layers based on message content
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-
-    // DNS resolution errors
-    if (error instanceof ResolutionError || message.includes("dns resolution failed") || message.includes("no addresses found")) {
-      return ExitCode.DNS_FAILED;
-    }
-
-    // SSRF/blocked address errors
-    if (error instanceof BlockedAddressError || message.includes("ssrf guard blocked")) {
-      return ExitCode.DNS_FAILED;
-    }
-
-    // TCP connection errors
-    if (message.includes("connection refused") ||
-        message.includes("econnrefused") ||
-        message.includes("etimedout") ||
-        message.includes("timeout") ||
-        message.includes("connect") ||
-        message.includes("tcp") ||
-        message.includes("socket")) {
-      // Check if it's specifically a TLS error first
-      if (message.includes("tls") || message.includes("ssl") || message.includes("certificate") || message.includes("handshake")) {
-        return ExitCode.TLS_FAILED;
-      }
-      // Check if it's an HTTP error
-      if (message.includes("http") || message.includes("ttfb") || message.includes("body") || message.includes("response") || message.includes("status")) {
-        return ExitCode.HTTP_FAILED;
-      }
-      return ExitCode.TCP_FAILED;
-    }
-
-    // TLS errors
-    if (message.includes("tls") || message.includes("ssl") || message.includes("certificate") || message.includes("handshake") || message.includes("secureconnect")) {
-      return ExitCode.TLS_FAILED;
-    }
-
-    // HTTP errors
-    if (message.includes("http") || message.includes("ttfb") || message.includes("body download") || message.includes("response") || message.includes("status code") || message.includes("headers")) {
-      return ExitCode.HTTP_FAILED;
-    }
-
-    // All runs failed
-    if (message.includes("all runs failed")) {
-      return ExitCode.ALL_RUNS_FAILED;
-    }
-
-    // Invalid args (validation errors)
-    if (message.includes("invalid") || message.includes("missing required") || message.includes("too many") || message.includes("unknown option") || message.includes("short flags") || message.includes("must be a positive") || message.includes("must be a non-negative")) {
-      return ExitCode.INVALID_ARGS;
-    }
+  // BlockedAddressError is NOT a NetworkAtonomyError (it lives in resolve.ts
+  // and is thrown by the SSRF guard before any stage runs). Map it by class.
+  if (error instanceof BlockedAddressError) {
+    return ExitCode.BLOCKED_ADDRESS;
   }
 
-  // Default to internal error for unknown errors
+  // ResolutionError is also a plain Error. Map it by class.
+  if (error instanceof ResolutionError) {
+    return ExitCode.NETWORK_FAILURE;
+  }
+
+  // Everything else is unexpected. Exit 255 so a reworded message or a
+  // surprise subclass can never silently change the exit code.
   return ExitCode.INTERNAL_ERROR;
 }
 

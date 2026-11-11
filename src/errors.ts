@@ -7,23 +7,26 @@ export enum ExitCode {
   OK = 0,
   /** Invalid command-line arguments provided. */
   INVALID_ARGS = 1,
-  /** DNS resolution failed. */
-  DNS_FAILED = 2,
-  /** TCP connection failed. */
-  TCP_FAILED = 3,
-  /** TLS handshake failed. */
-  TLS_FAILED = 4,
-  /** HTTP request failed (TTFB or body download). */
-  HTTP_FAILED = 5,
-  /** All probe runs failed. */
-  ALL_RUNS_FAILED = 6,
+  /** Blocked address (SSRF guard). */
+  BLOCKED_ADDRESS = 2,
+  /** Network Failure: DNS resolution failed, connection refused, host unreachable, or TLS verification failed. */
+  NETWORK_FAILURE = 3,
+  /** Timeout: any stage timed out exceeding configured limits. */
+  TIMEOUT = 4,
+  /** Redirect loop detected. */
+  REDIRECT_LOOP = 7,
+  /** Too many redirects. */
+  TOO_MANY_REDIRECTS = 8,
   /** Internal/unexpected error. */
   INTERNAL_ERROR = 255,
 }
 
 /**
  * Base class for all Network Atonomy errors.
- * Provides a consistent way to identify error categories and their exit codes.
+ *
+ * Every subclass carries a single, immutable `exitCode` property. The CLI's
+ * `mapErrorToExitCode` reads that property and never inspects the error
+ * message, so a reworded message can never change the exit code.
  */
 export abstract class NetworkAtonomyError extends Error {
   public readonly exitCode: ExitCode;
@@ -52,7 +55,7 @@ export class InvalidArgsError extends NetworkAtonomyError {
 /** Error thrown when DNS resolution fails. */
 export class DnsFailedError extends NetworkAtonomyError {
   constructor(message: string) {
-    super(message, ExitCode.DNS_FAILED, "dns");
+    super(message, ExitCode.NETWORK_FAILURE, "dns");
     this.name = "DnsFailedError";
   }
 }
@@ -60,7 +63,7 @@ export class DnsFailedError extends NetworkAtonomyError {
 /** Error thrown when TCP connection fails. */
 export class TcpFailedError extends NetworkAtonomyError {
   constructor(message: string) {
-    super(message, ExitCode.TCP_FAILED, "tcp");
+    super(message, ExitCode.NETWORK_FAILURE, "tcp");
     this.name = "TcpFailedError";
   }
 }
@@ -68,7 +71,7 @@ export class TcpFailedError extends NetworkAtonomyError {
 /** Error thrown when TLS handshake fails. */
 export class TlsFailedError extends NetworkAtonomyError {
   constructor(message: string) {
-    super(message, ExitCode.TLS_FAILED, "tls");
+    super(message, ExitCode.NETWORK_FAILURE, "tls");
     this.name = "TlsFailedError";
   }
 }
@@ -76,16 +79,40 @@ export class TlsFailedError extends NetworkAtonomyError {
 /** Error thrown when HTTP request fails (TTFB or body download). */
 export class HttpFailedError extends NetworkAtonomyError {
   constructor(message: string) {
-    super(message, ExitCode.HTTP_FAILED, "http");
+    super(message, ExitCode.NETWORK_FAILURE, "http");
     this.name = "HttpFailedError";
+  }
+}
+
+/** Error thrown when a timeout occurs. */
+export class TimeoutError extends NetworkAtonomyError {
+  constructor(message: string) {
+    super(message, ExitCode.TIMEOUT, "timeout");
+    this.name = "TimeoutError";
   }
 }
 
 /** Error thrown when all probe runs fail. */
 export class AllRunsFailedError extends NetworkAtonomyError {
   constructor(message: string) {
-    super(message, ExitCode.ALL_RUNS_FAILED, "all");
+    super(message, ExitCode.NETWORK_FAILURE, "all");
     this.name = "AllRunsFailedError";
+  }
+}
+
+/** Error thrown when a redirect loop is detected. */
+export class RedirectLoopError extends NetworkAtonomyError {
+  constructor(message: string) {
+    super(message, ExitCode.REDIRECT_LOOP, "redirect");
+    this.name = "RedirectLoopError";
+  }
+}
+
+/** Error thrown when too many redirects are encountered. */
+export class TooManyRedirectsError extends NetworkAtonomyError {
+  constructor(message: string) {
+    super(message, ExitCode.TOO_MANY_REDIRECTS, "redirect");
+    this.name = "TooManyRedirectsError";
   }
 }
 

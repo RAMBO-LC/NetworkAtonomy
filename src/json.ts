@@ -64,6 +64,7 @@ export function isAggregatedResults(value: unknown): value is AggregatedResults 
     typeof obj.url !== "string" ||
     typeof obj.ip !== "string" ||
     typeof obj.family !== "string" ||
+    typeof obj.statusCode !== "number" ||
     !Array.isArray(obj.warnings) ||
     !obj.stages ||
     typeof obj.stages !== "object" ||

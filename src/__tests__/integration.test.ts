@@ -717,7 +717,7 @@ describe("integration - error handling with local servers", () => {
       "1",
     ]);
 
-    expect(exitCode).toBe(ExitCode.TCP_FAILED);
+    expect(exitCode).toBe(ExitCode.NETWORK_FAILURE);
     expect(stderr).toContain("Error:");
   });
 });

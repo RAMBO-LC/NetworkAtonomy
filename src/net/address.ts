@@ -87,8 +87,9 @@ function ipv4ToNumber(ip: string): number {
   }
   let result = 0;
   for (let i = 0; i < 4; i++) {
-    const octet = parseInt(parts[i], 10);
-    if (isNaN(octet) || octet < 0 || octet > 255 || parts[i].length !== String(octet).length) {
+    const part = parts[i] ?? "";
+    const octet = parseInt(part, 10);
+    if (isNaN(octet) || octet < 0 || octet > 255 || part.length !== String(octet).length) {
       throw new Error(`Invalid IPv4 address: ${ip}`);
     }
     result = (result << 8) | octet;
@@ -117,7 +118,7 @@ function ipv6ToBigInt(ip: string): bigint {
   // Handle IPv4-mapped IPv6 addresses (::ffff:x.x.x.x)
   if (ip.includes(".")) {
     const parts = ip.split(":");
-    const lastPart = parts[parts.length - 1];
+    const lastPart = parts[parts.length - 1] ?? "";
     if (lastPart.includes(".")) {
       const ipv4Part = lastPart;
       const ipv4Num = ipv4ToNumber(ipv4Part);

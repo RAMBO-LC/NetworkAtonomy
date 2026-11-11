@@ -8,11 +8,24 @@
 
 import { performance } from "node:perf_hooks";
 import { validateUrl, type ValidUrl } from "./url/validate";
-import { resolveHostname, type ResolvedHost } from "./net/resolve";
+import { resolveHostname, type ResolvedHost, ResolutionError, BlockedAddressError } from "./net/resolve";
 import { measureDns, type DnsTimingResult } from "./stages/dns";
 import { measureTcp, type TcpTimingResult } from "./stages/tcp";
 import { measureTls, type TlsTimingResult } from "./stages/tls";
 import { measureHttp, type HttpTimingResult, type HttpTimingOptions } from "./stages/http";
+import {
+  ExitCode,
+  NetworkAtonomyError,
+  InvalidArgsError,
+  RedirectLoopError,
+  TooManyRedirectsError,
+  TimeoutError,
+  InternalError,
+  TcpFailedError,
+  TlsFailedError,
+  HttpFailedError,
+  DnsFailedError,
+} from "./errors";
 
 /**
  * Timing results for a single run across all stages.
@@ -64,7 +77,7 @@ export interface AggregatedResults {
     ttfb: StageStats;
     body: StageStats;
   };
-  /** Total time statistics (sum of stage medians). */
+  /** Total time statistics (median of per-run totals). */
   total: StageStats;
   /** Number of runs requested. */
   runsRequested: number;
@@ -78,8 +91,48 @@ export interface AggregatedResults {
   ip: string;
   /** Address family. */
   family: "IPv4" | "IPv6";
+  /** HTTP status code from the first successful run. */
+  statusCode: number;
   /** Warnings from failed runs (if any). */
   warnings: string[];
+  /** Per-hop timing results for redirect chain. */
+  hops: HopResult[];
+}
+
+/** Timing results for a single redirect hop. */
+export interface HopResult {
+  /** The URL that was requested for this hop. */
+  url: string;
+  /** HTTP status code for this hop. */
+  statusCode: number;
+  /** The IP address connected to for this hop. */
+  ip: string;
+  /** Address family (IPv4 or IPv6). */
+  family: "IPv4" | "IPv6";
+  /** Per-stage statistics for this hop. */
+  stages: {
+    dns: StageStats;
+    tcp: StageStats;
+    tls: StageStats;
+    ttfb: StageStats;
+    body: StageStats;
+  };
+}
+
+/**
+ * Timing results for a single hop within a single run.
+ */
+interface HopTimingResult {
+  url: string;
+  statusCode: number;
+  dnsMs: number;
+  tcpMs: number;
+  tlsMs: number;
+  ttfbMs: number;
+  bodyMs: number;
+  totalMs: number;
+  ip: string;
+  family: "ipv4" | "ipv6";
 }
 
 /**
@@ -98,6 +151,10 @@ export interface ProbeOptions {
   maxBody?: number;
   /** Whether to skip TLS certificate verification. Default: false. */
   rejectUnauthorized?: boolean;
+  /** Whether to allow private/loopback addresses (bypass SSRF guard). Default: false. */
+  allowPrivate?: boolean;
+  /** Maximum redirect hops to follow. Default: 5. */
+  maxRedirects?: number;
   /** Per-stage timeouts in ms. */
   timeouts?: {
     dns?: number;
@@ -113,9 +170,9 @@ export interface ProbeOptions {
 /**
  * Result of a single run attempt (success or failure).
  */
-interface RunAttemptResult {
+export interface RunAttemptResult {
   success: boolean;
-  timing?: RunTimingResult;
+  timing?: RunTimingResult & { hops: HopTimingResult[] };
   error?: Error;
 }
 
@@ -149,70 +206,183 @@ export function calculateStageStats(values: number[]): StageStats {
 }
 
 /**
- * Execute a single probe run.
+ * Execute a single probe run with redirect following.
  */
-async function executeSingleRun(
+export async function executeSingleRun(
   options: ProbeOptions,
-  resolvedHost: ResolvedHost,
+  initialResolvedHost: ResolvedHost,
 ): Promise<RunAttemptResult> {
-  const { url, maxBody = 10 * 1024 * 1024, rejectUnauthorized = true, timeouts } = options;
-  const { hostname, port, scheme } = url;
+  const { url: initialUrl, maxBody = 10 * 1024 * 1024, rejectUnauthorized = true, maxRedirects = 5 } = options;
+  const maxHops = maxRedirects;
 
-  try {
-    // Stage 1: DNS Resolution
-    const dnsStart = performance.now();
-    const dnsResult = await measureDns(hostname, options.dnsResolver);
-    const dnsMs = performance.now() - dnsStart;
+  let currentUrl = initialUrl;
+  let currentResolvedHost = initialResolvedHost;
+  const visitedUrls = new Set<string>();
+  const hopTimings: HopTimingResult[] = [];
 
-    // Stage 2: TCP Connection
-    const tcpResult = await measureTcp(resolvedHost.address, port);
-    const tcpMs = tcpResult.durationMs;
+  let finalRunTiming: RunTimingResult | null = null;
 
-    // Stage 3: TLS Handshake
-    const tlsResult = await measureTls({
-      socket: tcpResult.socket,
-      hostname,
-      protocol: scheme + ":",
-      rejectUnauthorized,
-    });
-    const tlsMs = tlsResult.durationMs;
+  for (let hop = 0; hop <= maxHops; hop++) {
+    // Check for redirect loop
+    const urlKey = currentUrl.input;
+    if (visitedUrls.has(urlKey)) {
+      throw new RedirectLoopError(`Redirect loop detected: ${urlKey}`);
+    }
+    visitedUrls.add(urlKey);
 
-    // Stage 4 & 5: HTTP Request (TTFB + Body)
-    const httpOptions: HttpTimingOptions = {
-      socket: tlsResult.socket,
-      hostname,
-      path: url.input.includes("://") ? new URL(url.input).pathname + new URL(url.input).search : "/",
-      port: port !== (scheme === "http" ? 80 : 443) ? port : undefined,
-      maxBody,
-      protocol: scheme + ":",
-    };
-    const httpResult = await measureHttp(httpOptions);
-    const ttfbMs = httpResult.ttfbMs;
-    const bodyMs = httpResult.bodyMs;
+    const { hostname, port, scheme } = currentUrl;
 
-    const totalMs = dnsMs + tcpMs + tlsMs + ttfbMs + bodyMs;
+    try {
+      // Stage 1: DNS Resolution
+      let dnsResult: DnsTimingResult;
+      let dnsMs: number;
+      try {
+        const dnsStart = performance.now();
+        dnsResult = await measureDns(hostname, options.dnsResolver);
+        dnsMs = performance.now() - dnsStart;
+      } catch (err) {
+        throw new DnsFailedError(err instanceof Error ? err.message : String(err));
+      }
 
-    return {
-      success: true,
-      timing: {
+      // Stage 2: TCP Connection
+      let tcpResult: TcpTimingResult;
+      let tcpMs: number;
+      try {
+        tcpResult = await measureTcp(currentResolvedHost.address, port);
+        tcpMs = tcpResult.durationMs;
+      } catch (err) {
+        throw new TcpFailedError(err instanceof Error ? err.message : String(err));
+      }
+
+      // Stage 3: TLS Handshake
+      let tlsResult: TlsTimingResult;
+      let tlsMs: number;
+      try {
+        tlsResult = await measureTls({
+          socket: tcpResult.socket,
+          hostname,
+          protocol: scheme + ":",
+          rejectUnauthorized,
+        });
+        tlsMs = tlsResult.durationMs;
+      } catch (err) {
+        throw new TlsFailedError(err instanceof Error ? err.message : String(err));
+      }
+
+      // Stage 4 & 5: HTTP Request (TTFB + Body)
+      let httpResult: HttpTimingResult;
+      let ttfbMs: number;
+      let bodyMs: number;
+      try {
+        const httpOptions: HttpTimingOptions = {
+          socket: tlsResult.socket,
+          hostname,
+          path: currentUrl.input.includes("://") ? new URL(currentUrl.input).pathname + new URL(currentUrl.input).search : "/",
+          port: port !== (scheme === "http" ? 80 : 443) ? port : undefined,
+          maxBody,
+          protocol: scheme + ":",
+        };
+        httpResult = await measureHttp(httpOptions);
+        ttfbMs = httpResult.ttfbMs;
+        bodyMs = httpResult.bodyMs;
+      } catch (err) {
+        throw new HttpFailedError(err instanceof Error ? err.message : String(err));
+      }
+
+      const totalMs = dnsMs + tcpMs + tlsMs + ttfbMs + bodyMs;
+
+      // Record this hop's timing
+      const hopTiming: HopTimingResult = {
+        url: currentUrl.input,
+        statusCode: httpResult.statusCode,
         dnsMs,
         tcpMs,
         tlsMs,
         ttfbMs,
         bodyMs,
         totalMs,
-        statusCode: httpResult.statusCode,
-        bytesReceived: httpResult.bytesReceived,
-        ip: resolvedHost.address,
-        family: resolvedHost.family,
-      },
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
+        ip: currentResolvedHost.address,
+        family: currentResolvedHost.family,
+      };
+      hopTimings.push(hopTiming);
+
+      // Check if this is a redirect (3xx)
+      const isRedirect = httpResult.statusCode >= 300 && httpResult.statusCode < 400;
+
+      if (!isRedirect) {
+        // Final response
+        finalRunTiming = {
+          dnsMs: hopTimings.reduce((sum, h) => sum + h.dnsMs, 0),
+          tcpMs: hopTimings.reduce((sum, h) => sum + h.tcpMs, 0),
+          tlsMs: hopTimings.reduce((sum, h) => sum + h.tlsMs, 0),
+          ttfbMs: hopTimings.reduce((sum, h) => sum + h.ttfbMs, 0),
+          bodyMs: hopTimings.reduce((sum, h) => sum + h.bodyMs, 0),
+          totalMs: hopTimings.reduce((sum, h) => sum + h.totalMs, 0),
+          statusCode: httpResult.statusCode,
+          bytesReceived: httpResult.bytesReceived,
+          ip: currentResolvedHost.address,
+          family: currentResolvedHost.family,
+        };
+        break;
+      }
+
+      // It's a redirect - check if we've exceeded max redirects
+      if (hop >= maxHops) {
+        throw new TooManyRedirectsError(`Too many redirects (max: ${maxHops})`);
+      }
+
+      // Follow the redirect
+      const location = httpResult.location;
+      if (!location) {
+        throw new Error(`Redirect status ${httpResult.statusCode} but no Location header`);
+      }
+
+      // Resolve the redirect URL against the current URL
+      let redirectUrl: URL;
+      try {
+        redirectUrl = new URL(location, currentUrl.input);
+      } catch {
+        throw new InvalidArgsError(`Invalid Location header: ${location}`);
+      }
+
+      // Validate scheme - only http or https allowed
+      if (redirectUrl.protocol !== "http:" && redirectUrl.protocol !== "https:") {
+        throw new InvalidArgsError(`Redirect to unsupported scheme: ${redirectUrl.protocol}`);
+      }
+
+      // Resolve the new hostname with SSRF check
+      const newHostname = redirectUrl.hostname;
+      const newPort = redirectUrl.port ? parseInt(redirectUrl.port, 10) : (redirectUrl.protocol === "https:" ? 443 : 80);
+      const newScheme = redirectUrl.protocol.slice(0, -1); // "http:" -> "http"
+
+      // Resolve with SSRF check (allowPrivate applies to all hops)
+      currentResolvedHost = await resolveHostname(newHostname, options.dnsResolver, options.allowPrivate);
+
+      // Create new ValidUrl for the redirect target
+      // We need to create a ValidUrl-like object
+      currentUrl = {
+        input: redirectUrl.toString(),
+        hostname: newHostname,
+        port: newPort,
+        scheme: newScheme,
+      } as ValidUrl;
+    } catch (error) {
+      // Clean up socket on error
+      throw error;
+    }
   }
+
+  if (!finalRunTiming) {
+    throw new TooManyRedirectsError("Too many redirects");
+  }
+
+  return {
+    success: true,
+    timing: {
+      ...finalRunTiming,
+      hops: hopTimings,
+    },
+  };
 }
 
 /**
@@ -228,8 +398,13 @@ async function executeRuns(
   if (concurrency <= 1) {
     // Sequential execution
     for (let i = 0; i < runs; i++) {
-      const result = await executeSingleRun(options, resolvedHost);
-      results.push(result);
+      try {
+        const result = await executeSingleRun(options, resolvedHost);
+        results.push(result);
+      } catch (error) {
+        // Per spec section 7: a failed run is recorded as a failure, not an abort.
+        results.push({ success: false, error: error instanceof Error ? error : new Error(String(error)) });
+      }
       if (i < runs - 1 && delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
@@ -240,8 +415,13 @@ async function executeRuns(
     const running = new Set<Promise<void>>();
 
     const runNext = async (index: number): Promise<void> => {
-      const result = await executeSingleRun(options, resolvedHost);
-      results[index] = result;
+      try {
+        const result = await executeSingleRun(options, resolvedHost);
+        results[index] = result;
+      } catch (error) {
+        // Per spec section 7: a failed run is recorded as a failure, not an abort.
+        results[index] = { success: false, error: error instanceof Error ? error : new Error(String(error)) };
+      }
       if (delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
@@ -279,26 +459,35 @@ export async function runProbes(
   // Validate URL
   const validation = validateUrl(inputUrl);
   if (!validation.ok) {
-    throw new Error(`Error: ${validation.message}`);
+    throw new InvalidArgsError(`Error: ${validation.message}`);
   }
 
   const { runs = 5, ...probeOptions } = options;
   const probeOpts: ProbeOptions = { url: validation, runs, ...probeOptions };
 
   // Resolve hostname once (reused across runs for SSRF protection)
-  const resolvedHost = await resolveHostname(validation.hostname, probeOpts.dnsResolver);
+  const resolvedHost = await resolveHostname(validation.hostname, probeOpts.dnsResolver, probeOpts.allowPrivate);
 
   // Execute runs
   const runResults = await executeRuns(probeOpts, resolvedHost);
 
   // Separate successful and failed runs
-  const successfulRuns = runResults.filter((r): r is RunAttemptResult & { timing: RunTimingResult } => r.success);
+  const successfulRuns = runResults.filter((r): r is RunAttemptResult & { timing: RunTimingResult & { hops: HopTimingResult[] } } => r.success);
   const failedRuns = runResults.filter((r) => !r.success);
 
   // If all runs failed, throw an error
   if (successfulRuns.length === 0) {
     const firstError = failedRuns[0]?.error;
-    throw firstError ?? new Error("All runs failed with unknown error");
+    // BlockedAddressError and ResolutionError are not NetworkAtonomyError
+    // subclasses (they live in resolve.ts). Re-throw them directly so
+    // mapErrorToExitCode in cli.ts can map them by class.
+    if (firstError instanceof BlockedAddressError || firstError instanceof ResolutionError) {
+      throw firstError;
+    }
+    if (firstError instanceof NetworkAtonomyError) {
+      throw firstError;
+    }
+    throw new InternalError(firstError?.message ?? "All runs failed with unknown error");
   }
 
   // Collect timing values per stage
@@ -316,6 +505,23 @@ export async function runProbes(
   const ttfbStats = calculateStageStats(ttfbValues);
   const bodyStats = calculateStageStats(bodyValues);
   const totalStats = calculateStageStats(totalValues);
+
+  // Aggregate hop timings across runs
+  // For simplicity, use the first successful run's hop data
+  const firstRunHops = successfulRuns[0]!.timing.hops;
+  const aggregatedHops: HopResult[] = firstRunHops.map((hop) => ({
+    url: hop.url,
+    statusCode: hop.statusCode,
+    ip: hop.ip,
+    family: hop.family === "ipv4" ? "IPv4" : "IPv6",
+    stages: {
+      dns: { medianMs: hop.dnsMs, minMs: hop.dnsMs, maxMs: hop.dnsMs },
+      tcp: { medianMs: hop.tcpMs, minMs: hop.tcpMs, maxMs: hop.tcpMs },
+      tls: { medianMs: hop.tlsMs, minMs: hop.tlsMs, maxMs: hop.tlsMs },
+      ttfb: { medianMs: hop.ttfbMs, minMs: hop.ttfbMs, maxMs: hop.ttfbMs },
+      body: { medianMs: hop.bodyMs, minMs: hop.bodyMs, maxMs: hop.bodyMs },
+    },
+  }));
 
   // Prepare warnings
   const warnings: string[] = [];
@@ -338,7 +544,9 @@ export async function runProbes(
     url: inputUrl,
     ip: resolvedHost.address,
     family: resolvedHost.family === "ipv4" ? "IPv4" : "IPv6",
+    statusCode: successfulRuns[0]!.timing.statusCode,
     warnings,
+    hops: aggregatedHops,
   };
 }
 
@@ -367,7 +575,7 @@ export function printResults(results: AggregatedResults): void {
   console.log(`TTFB             ${formatMs(results.stages.ttfb.medianMs).padStart(8)} ms  ${formatMs(results.stages.ttfb.minMs).padStart(8)} ms  ${formatMs(results.stages.ttfb.maxMs).padStart(8)} ms`);
   console.log(`Body Download    ${formatMs(results.stages.body.medianMs).padStart(8)} ms  ${formatMs(results.stages.body.minMs).padStart(8)} ms  ${formatMs(results.stages.body.maxMs).padStart(8)} ms`);
   console.log("----------------------------------------------");
-  console.log(`Total            ${formatMs(results.total.medianMs).padStart(8)} ms  ${formatMs(results.total.minMs).padStart(8)} ms  ${formatMs(results.total.maxMs).padStart(8)} ms`);
+  console.log(`Total (median of per-run totals) ${formatMs(results.total.medianMs).padStart(8)} ms  ${formatMs(results.total.minMs).padStart(8)} ms  ${formatMs(results.total.maxMs).padStart(8)} ms`);
   console.log("");
 
   for (const warning of results.warnings) {

@@ -284,7 +284,7 @@ describe("runner - runProbes orchestration", () => {
 
     await runProbes("http://example.com", { runs: 1, dnsResolver: customResolver });
 
-    expect(mockResolveHostname).toHaveBeenCalledWith("example.com", customResolver);
+    expect(mockResolveHostname).toHaveBeenCalledWith("example.com", customResolver, undefined);
   });
 
   it("handles HTTPS with TLS timing", async () => {
@@ -299,7 +299,10 @@ describe("runner - runProbes orchestration", () => {
   });
 
   it("respects delay between runs", async () => {
-    const delaySpy = vi.spyOn(globalThis, "setTimeout").mockImplementation((cb) => cb() as any);
+    const delaySpy = vi.spyOn(globalThis, "setTimeout").mockImplementation((cb: TimerHandler) => {
+      if (typeof cb === "function") cb();
+      return 0 as any;
+    });
 
     await runProbes("http://example.com", { runs: 2, delayMs: 100 });
 

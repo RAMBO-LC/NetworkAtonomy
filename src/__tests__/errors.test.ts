@@ -11,21 +11,24 @@ import {
   TcpFailedError,
   TlsFailedError,
   HttpFailedError,
+  TimeoutError,
   AllRunsFailedError,
+  RedirectLoopError,
+  TooManyRedirectsError,
   InternalError,
   getExitCode,
   isNetworkAtonomyError,
 } from "../errors";
 
 describe("ExitCode enum", () => {
-  it("has correct values", () => {
+  it("has correct values matching docs/spec.md", () => {
     expect(ExitCode.OK).toBe(0);
     expect(ExitCode.INVALID_ARGS).toBe(1);
-    expect(ExitCode.DNS_FAILED).toBe(2);
-    expect(ExitCode.TCP_FAILED).toBe(3);
-    expect(ExitCode.TLS_FAILED).toBe(4);
-    expect(ExitCode.HTTP_FAILED).toBe(5);
-    expect(ExitCode.ALL_RUNS_FAILED).toBe(6);
+    expect(ExitCode.BLOCKED_ADDRESS).toBe(2);
+    expect(ExitCode.NETWORK_FAILURE).toBe(3);
+    expect(ExitCode.TIMEOUT).toBe(4);
+    expect(ExitCode.REDIRECT_LOOP).toBe(7);
+    expect(ExitCode.TOO_MANY_REDIRECTS).toBe(8);
     expect(ExitCode.INTERNAL_ERROR).toBe(255);
   });
 
@@ -79,9 +82,9 @@ describe("InvalidArgsError", () => {
 });
 
 describe("DnsFailedError", () => {
-  it("has correct exit code and stage", () => {
+  it("has correct exit code and stage (NETWORK_FAILURE per spec)", () => {
     const error = new DnsFailedError("DNS resolution failed");
-    expect(error.exitCode).toBe(ExitCode.DNS_FAILED);
+    expect(error.exitCode).toBe(ExitCode.NETWORK_FAILURE);
     expect(error.stage).toBe("dns");
     expect(error.name).toBe("DnsFailedError");
   });
@@ -93,9 +96,9 @@ describe("DnsFailedError", () => {
 });
 
 describe("TcpFailedError", () => {
-  it("has correct exit code and stage", () => {
+  it("has correct exit code and stage (NETWORK_FAILURE per spec)", () => {
     const error = new TcpFailedError("Connection refused");
-    expect(error.exitCode).toBe(ExitCode.TCP_FAILED);
+    expect(error.exitCode).toBe(ExitCode.NETWORK_FAILURE);
     expect(error.stage).toBe("tcp");
     expect(error.name).toBe("TcpFailedError");
   });
@@ -107,9 +110,9 @@ describe("TcpFailedError", () => {
 });
 
 describe("TlsFailedError", () => {
-  it("has correct exit code and stage", () => {
+  it("has correct exit code and stage (NETWORK_FAILURE per spec)", () => {
     const error = new TlsFailedError("TLS handshake failed");
-    expect(error.exitCode).toBe(ExitCode.TLS_FAILED);
+    expect(error.exitCode).toBe(ExitCode.NETWORK_FAILURE);
     expect(error.stage).toBe("tls");
     expect(error.name).toBe("TlsFailedError");
   });
@@ -121,9 +124,9 @@ describe("TlsFailedError", () => {
 });
 
 describe("HttpFailedError", () => {
-  it("has correct exit code and stage", () => {
+  it("has correct exit code and stage (NETWORK_FAILURE per spec)", () => {
     const error = new HttpFailedError("HTTP request failed");
-    expect(error.exitCode).toBe(ExitCode.HTTP_FAILED);
+    expect(error.exitCode).toBe(ExitCode.NETWORK_FAILURE);
     expect(error.stage).toBe("http");
     expect(error.name).toBe("HttpFailedError");
   });
@@ -134,16 +137,58 @@ describe("HttpFailedError", () => {
   });
 });
 
-describe("AllRunsFailedError", () => {
+describe("TimeoutError", () => {
   it("has correct exit code and stage", () => {
+    const error = new TimeoutError("Request timed out");
+    expect(error.exitCode).toBe(ExitCode.TIMEOUT);
+    expect(error.stage).toBe("timeout");
+    expect(error.name).toBe("TimeoutError");
+  });
+
+  it("is instanceof NetworkAtonomyError", () => {
+    const error = new TimeoutError("test");
+    expect(isNetworkAtonomyError(error)).toBe(true);
+  });
+});
+
+describe("AllRunsFailedError", () => {
+  it("has correct exit code and stage (NETWORK_FAILURE per spec)", () => {
     const error = new AllRunsFailedError("All runs failed");
-    expect(error.exitCode).toBe(ExitCode.ALL_RUNS_FAILED);
+    expect(error.exitCode).toBe(ExitCode.NETWORK_FAILURE);
     expect(error.stage).toBe("all");
     expect(error.name).toBe("AllRunsFailedError");
   });
 
   it("is instanceof NetworkAtonomyError", () => {
     const error = new AllRunsFailedError("test");
+    expect(isNetworkAtonomyError(error)).toBe(true);
+  });
+});
+
+describe("RedirectLoopError", () => {
+  it("has correct exit code and stage", () => {
+    const error = new RedirectLoopError("Redirect loop detected");
+    expect(error.exitCode).toBe(ExitCode.REDIRECT_LOOP);
+    expect(error.stage).toBe("redirect");
+    expect(error.name).toBe("RedirectLoopError");
+  });
+
+  it("is instanceof NetworkAtonomyError", () => {
+    const error = new RedirectLoopError("test");
+    expect(isNetworkAtonomyError(error)).toBe(true);
+  });
+});
+
+describe("TooManyRedirectsError", () => {
+  it("has correct exit code and stage", () => {
+    const error = new TooManyRedirectsError("Too many redirects");
+    expect(error.exitCode).toBe(ExitCode.TOO_MANY_REDIRECTS);
+    expect(error.stage).toBe("redirect");
+    expect(error.name).toBe("TooManyRedirectsError");
+  });
+
+  it("is instanceof NetworkAtonomyError", () => {
+    const error = new TooManyRedirectsError("test");
     expect(isNetworkAtonomyError(error)).toBe(true);
   });
 });
@@ -165,11 +210,14 @@ describe("InternalError", () => {
 describe("getExitCode", () => {
   it("returns correct exit code for NetworkAtonomyError instances", () => {
     expect(getExitCode(new InvalidArgsError("test"))).toBe(ExitCode.INVALID_ARGS);
-    expect(getExitCode(new DnsFailedError("test"))).toBe(ExitCode.DNS_FAILED);
-    expect(getExitCode(new TcpFailedError("test"))).toBe(ExitCode.TCP_FAILED);
-    expect(getExitCode(new TlsFailedError("test"))).toBe(ExitCode.TLS_FAILED);
-    expect(getExitCode(new HttpFailedError("test"))).toBe(ExitCode.HTTP_FAILED);
-    expect(getExitCode(new AllRunsFailedError("test"))).toBe(ExitCode.ALL_RUNS_FAILED);
+    expect(getExitCode(new DnsFailedError("test"))).toBe(ExitCode.NETWORK_FAILURE);
+    expect(getExitCode(new TcpFailedError("test"))).toBe(ExitCode.NETWORK_FAILURE);
+    expect(getExitCode(new TlsFailedError("test"))).toBe(ExitCode.NETWORK_FAILURE);
+    expect(getExitCode(new HttpFailedError("test"))).toBe(ExitCode.NETWORK_FAILURE);
+    expect(getExitCode(new TimeoutError("test"))).toBe(ExitCode.TIMEOUT);
+    expect(getExitCode(new AllRunsFailedError("test"))).toBe(ExitCode.NETWORK_FAILURE);
+    expect(getExitCode(new RedirectLoopError("test"))).toBe(ExitCode.REDIRECT_LOOP);
+    expect(getExitCode(new TooManyRedirectsError("test"))).toBe(ExitCode.TOO_MANY_REDIRECTS);
     expect(getExitCode(new InternalError("test"))).toBe(ExitCode.INTERNAL_ERROR);
   });
 
@@ -190,7 +238,10 @@ describe("isNetworkAtonomyError", () => {
     expect(isNetworkAtonomyError(new TcpFailedError("test"))).toBe(true);
     expect(isNetworkAtonomyError(new TlsFailedError("test"))).toBe(true);
     expect(isNetworkAtonomyError(new HttpFailedError("test"))).toBe(true);
+    expect(isNetworkAtonomyError(new TimeoutError("test"))).toBe(true);
     expect(isNetworkAtonomyError(new AllRunsFailedError("test"))).toBe(true);
+    expect(isNetworkAtonomyError(new RedirectLoopError("test"))).toBe(true);
+    expect(isNetworkAtonomyError(new TooManyRedirectsError("test"))).toBe(true);
     expect(isNetworkAtonomyError(new InternalError("test"))).toBe(true);
   });
 
